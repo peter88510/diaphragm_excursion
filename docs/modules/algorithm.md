@@ -254,15 +254,15 @@ main.py excursion phase **不傳 scale_x** → `time_sec / velocity` 為 None；
 
 | Mode | 行為 | 落地 |
 |---|---|---|
-| `LEGACY` | per-frame loop（**default**，等同舊 main.py 行為） | ✅ 11A |
-| `GLOBAL_WINDOW` | 抽 2 keyframe → 拼接 → 全局 excursion | ⬜ 11B 設計 backup / 11C 整合 |
+| `LEGACY` | per-frame loop（**default**，等同舊 main.py 行為） | ✅ 11A + 11C-LEGACY；`legacy_frame_indices` 過濾生效 |
+| `GLOBAL_WINDOW` | 抽 2 keyframe → 拼接 → 全局 excursion | ✅ 11B 邏輯（`run_global_window`）；⬜ 11C-GW main.py 整合 |
 | `REALTIME` | shift_x 累加 + partial window 即時更新 | ⬜ 探索階段 |
 
 #### Keyframe Strategies（GLOBAL_WINDOW 用）
 
 | Strategy | 來源 | 落地 |
 |---|---|---|
-| `FIXED_INDICES` | `cfg.keyframe_indices`（**default** `[88, 149]`） | ✅ |
+| `FIXED_INDICES` | `cfg.keyframe_indices`（**default** `[87, 149]`） | ✅ |
 | `PHASE_CORRELATE` | `_phase_correlate_keyframes(seq, cfg)` 累加位移算 | ⬜ stub（user 自補） |
 
 #### 設計取向
@@ -351,3 +351,5 @@ main.py       → algorithm   (orchestration)
 |---|---|---|---|
 | 2026-05-24 | v1.0 | 初版建立；§1-§6 全部章節定義；7 sub-package 依 pipeline 順序拆 §4.1-§4.7 | 文件化專案，深入 algorithm 內部 |
 | 2026-05-25 | — | §4.3 / §5 cfg 引用：`RunConfig.use_segment_label` → `RoiBandConfig.use_segment_label` | Patch 12A：RunConfig 已刪 |
+| 2026-05-25 | — | §4.6 LEGACY 標 ✅ 11A + 11C-LEGACY；GLOBAL_WINDOW 改 11C-GW | Patch 11C-LEGACY 落地 |
+| 2026-05-25 | — | §4.6 GLOBAL_WINDOW 邏輯標 ✅ 11B；keyframe default `[87, 149]` | Patch 11B 邏輯落地 |

@@ -11,7 +11,7 @@
 | 項目 | 值 |
 |---|---|
 | Tier | SNAPSHOT |
-| 版本 | 0.2 |
+| 版本 | 0.3 |
 | 最後更新 | 2026-05-25 |
 | 校對對象 | `config/*.py`、`algorithm/**/*.py`、`input/**/*.py`、`visualization/**/*.py` |
 | 狀態 | snapshot |
@@ -160,9 +160,12 @@ class KeyframeStrategy(Enum):
 | `mode` | `MultiframeMode` | `LEGACY` | dispatch 三模式之一 |
 | `legacy_frame_indices` | `Optional[List[int]]` | `None` | LEGACY 模式跑哪些 frame；None=全跑 |
 | `keyframe_strategy` | `KeyframeStrategy` | `FIXED_INDICES` | GLOBAL_WINDOW keyframe 取得策略 |
-| `keyframe_indices` | `List[int]` | `[88, 149]` | FIXED_INDICES 用；PHASE_CORRELATE 時 ignored |
+| `keyframe_indices` | `List[int]` | （experiment）| FIXED_INDICES 用；PHASE_CORRELATE 時 ignored；嚴格 2 個（multi-frame 上限）|
 | `stride_pixel` | `int` | `8` | 每 frame 位移（pixel）|
-| `stitch_length_px` | `Optional[int]` | `None` | None=自動算 `(idx[1]-idx[0])×stride`；override 直接設 |
+| `stitch_length_px_first` | `Optional[int]` | `None` | None=自動算 `min(idx[0]×stride, frame_width)`；frame_width cap 防超寬 |
+| `stitch_length_px_second` | `Optional[int]` | `None` | None=自動算 `(idx[1]-idx[0])×stride`；override 直接設 |
+
+> 視窗 pixel 公式為 multi-frame 實驗結果；理論上不會有超過 2 keyframe 的維度擴展。
 
 ---
 
@@ -284,7 +287,23 @@ class KeyframeStrategy(Enum):
 
 ### §2.9 `GlobalExcursionResult`
 
-`algorithm/multiframe/global_window.py`（**未實作**；設計見 `docs/notes/patch_11b_design_backup.md`）
+`algorithm/multiframe/global_window.py`
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `stitched_init_diaphragm` | `np.ndarray` | `(W_full,)` 拼接 init 軌跡 |
+| `stitched_smoothed_trough` | `np.ndarray` | wavelet 平滑（不重做，直接 concat keyframe 結果）|
+| `stitched_smoothed_crest` | `np.ndarray` |  |
+| `stitched_p_trough` | `np.ndarray` | peak-perspective；給 brightness_way 用 |
+| `stitched_p_crest` | `np.ndarray` |  |
+| `stitched_diaphragm_mask` | `np.ndarray` | `(H, W_full)` 拼接 mask |
+| `excursion` | `ExcursionResult` | 全局 brightness_way 結果 |
+| `measurements` | `List[PeakInfo]` | 全局物理量 per batch |
+| `keyframe_indices` | `List[int]` | 拼接用 keyframe |
+| `first_segment_len_px` | `int` | first 段實際長度（含 frame_width cap）|
+| `second_segment_len_px` | `int` | second 段實際長度 |
+| `stitch_boundary_x` | `int` | 拼接點 x 座標（= `first_segment_len_px`）|
+| `full_width` | `int` | 全局 signal 總寬 = `first_segment_len_px + second_segment_len_px` |
 
 ---
 
@@ -339,7 +358,7 @@ class KeyframeStrategy(Enum):
 | `get_legacy_frame_indices` | `(cfg, seq)` | `List[int]` | LEGACY 模式要跑的 frame indices |
 | `get_keyframe_indices` | `(cfg, seq)` | `List[int]` | GLOBAL_WINDOW 抽 keyframe；dispatch FIXED_INDICES / PHASE_CORRELATE |
 | `_phase_correlate_keyframes` | `(seq, cfg)` | `List[int]` | **stub**，raise NotImplementedError |
-| `run_global_window` | （見 backup） | `GlobalExcursionResult` | **未實作**；11B 落地 |
+| `run_global_window` | `(keyframe_motion_curves, keyframe_selections, multiframe_cfg, excursion_cfg, scale_y=None)` | `GlobalExcursionResult` | Mode 1 主入口；嚴格 2 keyframe |
 
 ### §3.8 Signal processing
 
@@ -354,6 +373,7 @@ class KeyframeStrategy(Enum):
 | `PipelineVisualizer.__init__` | `(cfg, excursion_config)` | — |  |
 | `PipelineVisualizer.render_frame` | `(frame_idx, image_gray, image_color, seg_mask, frame_result)` | `None` | disabled 時零 I/O |
 | `excursion_info_display` | `(figure, peaks_info, font_path=..., peak='ct', show_text=True)` | `np.ndarray` | crest/trough markers + 自訂字 |
+| `render_global_final` | `(global_result, image_color_first, image_color_second, cfg, excursion_cfg)` | `None` | GLOBAL_WINDOW final overlay；風格沿用 single-frame |
 
 ---
 
@@ -380,3 +400,6 @@ class KeyframeStrategy(Enum):
 |---|---|---|---|
 | 2026-05-24 | 0.1 | 初版建立；§1 9 個 cfg + §2 9 個 result + §3 ~18 個 function + §4 cross-ref | 進階文件化階段，提供欄位 / 簽名速查 |
 | 2026-05-25 | 0.2 | §1.3 加 `use_segment_label`；§1.6 RunConfig → RunBundle；§4 cross-ref 更新 | Patch 12A：刪 RunConfig + 建 RunBundle |
+| 2026-05-25 | 0.3 | §1.8 keyframe default `[88,149]` → `[87,149]`；§2.9 GlobalExcursionResult 完整欄位；§3.7 `run_global_window` 簽名實落地 | Patch 11B：GLOBAL_WINDOW 邏輯落地 |
+| 2026-05-25 | 0.4 | §1.8 `stitch_length_px` 拆 `stitch_length_px_first` + `stitch_length_px_second`；§2.9 `first_segment_len_px` / `second_segment_len_px` 取代舊欄位；移除具體 keyframe / pixel 數字（experiment 值） | Patch 11B'：stitching 邏輯改為兩段獨立 |
+| 2026-05-25 | 0.5 | §3.9 加 `render_global_final` | Patch 11D：GLOBAL_WINDOW final overlay |

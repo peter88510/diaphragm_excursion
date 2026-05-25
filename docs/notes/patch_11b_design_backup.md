@@ -10,11 +10,11 @@
 | 項目 | 值 |
 |---|---|
 | Tier | SNAPSHOT |
-| 版本 | 0.1 |
-| 最後更新 | 2026-05-24 |
-| 校對對象 | `algorithm/multiframe/global_window.py`（尚未實作） |
-| 狀態 | 待執行 |
-| 過期條件 | 11B 落地後 → 加 §「執行結果」段並標 stale；或落地內容偏離本草案 → 更新 |
+| 版本 | 0.3 |
+| 最後更新 | 2026-05-25 |
+| 校對對象 | `algorithm/multiframe/global_window.py`（已實作；Patch 11B' 兩段 stitching） |
+| 狀態 | implemented |
+| 過期條件 | `global_window.py` 邏輯變動 / API 簽名變動 → 更新或廢棄本檔 |
 
 ---
 
@@ -22,6 +22,10 @@
 
 Step 10 Multi-frame Excursion Mode 1（GLOBAL_WINDOW）的拼接邏輯。
 依賴 Patch 11A 已落地的 `MultiframeConfig` + `MultiframeMode` + `KeyframeStrategy`。
+
+**已於 2026-05-25 落地為 `algorithm/multiframe/global_window.py`**；本檔保留作設計史。
+
+**Patch 11B' 後續修正（同日落地）**：stitching 邏輯改為兩段獨立 — `first[:len_first] + second[-len_second:]`，避免原版 `first 完整 + second 右尾` 造成的 keyframe[0] 之後時段重複。具體 keyframe / pixel 數字已自 doc 移除（experiment 值會調，避免 doc rot）。
 
 ---
 
@@ -57,8 +61,8 @@ Step 10 Multi-frame Excursion Mode 1（GLOBAL_WINDOW）的拼接邏輯。
 ## §4 拼接長度 default 計算
 
 - `stitch_length_px = (keyframe_indices[1] - keyframe_indices[0]) × stride_pixel`
-- For default cfg `[88, 149]` & `stride=8`：→ `(149-88) × 8 = 488 pixel`
-- spec 寫 `62 × 8 = 496`（inclusive count）；user 要 496 可顯式 `cfg.stitch_length_px = 496`
+- For default cfg `[87, 149]` & `stride=8`：→ `(149-87) × 8 = **496 pixel**`（spec 對齊）
+- 早期 backup 寫過 `[88, 149]` → 488，那是 user 失誤的 keyframe；落地時已修正
 
 `MultiframeConfig` 加欄位：`stitch_length_px: Optional[int] = None`（None = 自動算）。
 
@@ -279,3 +283,5 @@ def _stitch_mask_2d(
 | 日期 | 版本 | 變更 | 動因 |
 |---|---|---|---|
 | 2026-05-24 | 0.1 | 初版建立（含原始 + 修正版提案、Q&A 討論、wavelet 設計決定） | Patch 11B backup；待 user 確認執行 |
+| 2026-05-25 | 0.2 | 標狀態 implemented；§4 default 488 → 496；§1 加修正備註 `[88,149]` → `[87,149]` | Patch 11B 邏輯落地 |
+| 2026-05-25 | 0.3 | §1 加 11B' 修正紀錄（兩段 stitching）；具體數字移除（experiment 值） | Patch 11B'：first/second 拆兩段獨立、frame_width cap |

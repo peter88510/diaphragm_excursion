@@ -52,9 +52,9 @@
 | 文件 | 版本 | 最後更新 | 狀態 | 校對對象 / 範圍 |
 |---|---|---|---|---|
 | [notes/size_normalization_pre_ratio_audit.md](notes/size_normalization_pre_ratio_audit.md) | 0.4 | 2026-05-23 | snapshot | `algorithm/` `config/` 內所有 size-sensitive 預設值；含 Step 9 ratio 化進度 |
-| [notes/patch_11b_design_backup.md](notes/patch_11b_design_backup.md) | 0.1 | 2026-05-24 | snapshot 待執行 | `algorithm/multiframe/global_window.py`（未實作）、相關 cfg / API 變更草案 |
+| [notes/patch_11b_design_backup.md](notes/patch_11b_design_backup.md) | 0.3 | 2026-05-25 | implemented | `algorithm/multiframe/global_window.py`（已落地，含 11B' 兩段 stitching）；保留作設計史 |
 | [notes/model_load_caching.md](notes/model_load_caching.md) | 0.1 | 2026-05-24 | snapshot | `algorithm/segmentation/paddleseg_segmenter.py`、`paddleseglibs/paddleseg/core/predict.py` 的 `skip_model_load` 旗標 |
-| [api_reference.md](api_reference.md) | 0.2 | 2026-05-25 | snapshot | `config/*.py`、`algorithm/**/*.py`、`input/**/*.py`、`visualization/**/*.py` 的欄位 / 簽名 |
+| [api_reference.md](api_reference.md) | 0.5 | 2026-05-25 | snapshot | `config/*.py`、`algorithm/**/*.py`、`input/**/*.py`、`visualization/**/*.py` 的欄位 / 簽名 |
 
 ---
 
@@ -85,3 +85,6 @@
 | 2026-05-24 | v1.0 | 初版建立；§1-§4 全部章節 + 12 份文件對照表 | CLAUDE.md §10.4 觸發（SNAPSHOT ≥ 3 份） |
 | 2026-05-24 | — | §3 加 `api_reference.md`（SNAPSHOT 0.1） | 進階文件化第 4 份 doc 落地 |
 | 2026-05-25 | — | `api_reference.md` 0.1 → 0.2；Last Updated bump | Patch 12A：cfg 結構整理連動 SNAPSHOT 同步 |
+| 2026-05-25 | — | `api_reference.md` 0.2 → 0.3；`patch_11b_design_backup.md` 0.1 → 0.2 標 implemented | Patch 11B 邏輯落地連動 SNAPSHOT 同步 |
+| 2026-05-25 | — | `api_reference.md` 0.3 → 0.4；`patch_11b_design_backup.md` 0.2 → 0.3 | Patch 11B'：兩段 stitching 連動 SNAPSHOT 同步 |
+| 2026-05-25 | — | `api_reference.md` 0.4 → 0.5；§3.9 加 `render_global_final` | Patch 11C-GW + 11D：main.py dispatch + global final viz |

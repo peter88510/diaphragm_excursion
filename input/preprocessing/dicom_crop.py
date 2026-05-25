@@ -15,8 +15,8 @@ from dataclasses import replace
 from input.frame_sequence import FrameSequence
 
 
-DEFAULT_RULER = 40
-DEFAULT_BLACK_PADDING = 50
+DEFAULT_RULER = 20
+DEFAULT_BLACK_PADDING = 0
 
 
 def apply_dicom_crop(

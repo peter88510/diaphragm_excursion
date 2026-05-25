@@ -170,6 +170,14 @@
 - **本質**：multi-frame = 多次 single-frame 結果組合
 - **拆解為兩種模式**：
 
+#### 模式狀態總覽
+
+| Mode | 整合進度 | 對應 patch |
+|---|---|---|
+| `LEGACY` | ✅ 已整合進 main.py | 11A（cfg） + 11C-LEGACY（main 接 `legacy_frame_indices`） |
+| `GLOBAL_WINDOW` | ⬜ 設計 backup 中 | 11B（拼接邏輯）+ 11C-GW（main 整合）|
+| `REALTIME` | ⬜ 探索階段 | 未來 |
+
 #### 模式一：Global Window 拼接
 - **目的**：固定視窗策略建立完整 global signal，套既有 excursion 演算法
 - **已知條件**：
@@ -262,7 +270,9 @@
    - CLAUDE.md v1.1 與 Claude memory 機制建立完成
    - Step 9 / Step 10 規劃已整入本檔（取自 `下一步.txt` / `下下一步.txt`）
 
-⚠️ **2026-05-25 週一驗證項**：跑 `python main.py`，預期 log 與 Patch 9G 後 byte-identical（標準 1500×955 影像）。Step 9 三 patch 對 canonical 尺寸 round() 還原為原 hardcode pixel 值，理論上零行為差異。
+⚠️ **2026-05-25 週一驗證項**：跑 `python main.py`，預期 log 與 Patch 9G 後 byte-identical（標準 1500×955 影像）。Step 9 三 patch 對 canonical 尺寸 round() 還原為原 hardcode pixel 值，理論上零行為差異。**已驗證通過**。
+
+📌 **Patch 11C-LEGACY 已落地**：main.py 接 `bundle.multiframe.legacy_frame_indices` 過濾 for-loop。預設 None=全跑（與舊行為一致）；設成 `[140]` 等 list 就只跑指定 frame。GLOBAL_WINDOW / REALTIME mode 設成會 raise NotImplementedError（明確告知未整合）。
 2. **驗證指令**（Step 7 收尾未驗）：
    - 預設關 viz 跑一次：`python main.py`，log 應與 Patch 8 完全一致（零 `output/` 副作用）
    - 開 viz 跑一次：手動把 `viz_cfg = VisualizationConfig()` 改成 `VisualizationConfig(enabled=True, save_final=True, save_debug=True)`，看 `output/final/` 與 `output/debug/{stage}/` 內容

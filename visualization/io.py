@@ -21,6 +21,11 @@ def final_path(cfg: VisualizationConfig, frame_idx: int) -> Path:
     return cfg.output_dir / "final" / f"{frame_idx:04d}.png"
 
 
+def global_final_path(cfg: VisualizationConfig) -> Path:
+    """GLOBAL_WINDOW mode 的全局 final overlay；單一檔不帶 frame_idx。"""
+    return cfg.output_dir / "global" / "final.png"
+
+
 def debug_path(cfg: VisualizationConfig, stage: str, frame_idx: int) -> Path:
     # stage 是內部常數，但會落到檔案系統 — 做基本 sanitize 防意外字元（CLAUDE.md §9）
     safe = stage.replace("_", "").replace("-", "")

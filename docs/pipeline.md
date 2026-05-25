@@ -217,25 +217,36 @@ Per `MultiframeConfig.mode` 分三路：
 
 | Mode | 行為 | 落地進度 |
 |---|---|---|
-| `LEGACY` | per-frame loop（同舊 main.py） | ✅ Patch 11A 已配置；`get_legacy_frame_indices(cfg, seq) → List[int]`（None=全跑、list=指定 frame）|
-| `GLOBAL_WINDOW` | 抽 keyframe（FIXED_INDICES `[88, 149]` 或 PHASE_CORRELATE）→ 拼接 → 全局 excursion | ⬜ Patch 11B 設計 backup 中；11C main.py 整合 |
+| `LEGACY` | per-frame loop（同舊 main.py） | ✅ Patch 11A 配置 + 11C-LEGACY main.py 整合；`bundle.multiframe.legacy_frame_indices` 控制要跑的 frame（None=全跑、list=指定）|
+| `GLOBAL_WINDOW` | 抽 keyframe（FIXED_INDICES 或 PHASE_CORRELATE）→ 拼接 → 全局 excursion + final viz | ✅ Patch 11B / 11B' 邏輯 + 11C-GW main.py 整合 + 11D final overlay |
 | `REALTIME` | 增量 shift_x 累加，partial window 即時更新 | ⬜ 探索階段 |
 
 ### Keyframe selection（GLOBAL_WINDOW）
 
 ```
-KeyframeStrategy.FIXED_INDICES    → 用 cfg.keyframe_indices 直接照搬（default [88, 149]）
+KeyframeStrategy.FIXED_INDICES    → 用 cfg.keyframe_indices 直接照搬（experiment 值）
 KeyframeStrategy.PHASE_CORRELATE  → _phase_correlate_keyframes() stub（待 user 補實作）
 ```
 
-### Stitch length（GLOBAL_WINDOW，11B 預計）
+嚴格 2 個 keyframe（multi-frame 上限）。
+
+### Stitch length（GLOBAL_WINDOW）— 兩段獨立
 
 ```
-stitch_length_px = (keyframe_indices[1] - keyframe_indices[0]) × stride_pixel  (default)
-                 = cfg.stitch_length_px                                          (override)
+first  段長度 = min(keyframe_indices[0] × stride_pixel, frame_width)    (default)
+              = cfg.stitch_length_px_first（capped by frame_width）       (override)
+
+second 段長度 = (keyframe_indices[1] - keyframe_indices[0]) × stride_pixel  (default)
+              = cfg.stitch_length_px_second                                  (override)
 ```
 
-拼接：`frame[0] 完整 init/smoothed/p/mask` + `frame[1] 右邊界往左 stitch_length_px 段`。
+拼接：`frame[0] 取前 first 段` + `frame[1] 取右尾 second 段` → concat。
+
+物理意義：first ≈ 「掃描起點 → keyframe[0] 時刻」軌跡；second ≈ 「keyframe[0] → keyframe[1] 時刻」軌跡。
+
+**不重做 wavelet**（keyframe 已平滑過）；位移只在 x 方向，y 噪音忽略。
+
+> 視窗 pixel 公式為 multi-frame 實驗結果；理論上不會有超過 2 keyframe 的維度擴展。
 
 ---
 
@@ -282,3 +293,7 @@ excursion_brightness
 |---|---|---|---|
 | 2026-05-24 | v1.0 | 初版建立；§1-§9 全部章節定義 | 文件化專案，提供 per-frame data flow 對照 |
 | 2026-05-25 | — | §5.3 cfg 引用：`RunConfig.use_segment_label` → `RoiBandConfig.use_segment_label` | Patch 12A：RunConfig 已刪 |
+| 2026-05-25 | — | §8 LEGACY 標 ✅ 11C-LEGACY；GLOBAL_WINDOW 改 11C-GW | Patch 11C-LEGACY 落地 |
+| 2026-05-25 | — | §8 GLOBAL_WINDOW 邏輯標 ✅ 11B；keyframe default `[87, 149]`；stitch_length 496 對齊 spec | Patch 11B 邏輯落地 |
+| 2026-05-25 | — | §8 Stitch length 拆兩段獨立（first + second）；移除具體 keyframe / pixel 數字（experiment 值，避免 doc rot） | Patch 11B'：兩段 stitching 邏輯 |
+| 2026-05-25 | — | §8 GLOBAL_WINDOW 標 ✅ 11C-GW + 11D；main.py mode dispatch + global final viz 落地 | Patch 11C-GW + 11D |
