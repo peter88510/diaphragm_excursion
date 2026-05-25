@@ -150,14 +150,15 @@
 - **狀態**：⬜ 暫緩
 - **理由**：用戶選擇先重整 main 入口、自行 debug；必要時再回頭寫驗證 script
 
-### Step 9 — Size Normalization Audit（**規劃中**）
-- **狀態**：⬜ 未開始
+### Step 9 — Size Normalization Audit（**已完成**）
+- **狀態**：✅ 完成（2026-05-23 ~ 05-24）
 - **動機**：許多演算法參數歷史上 hardcode 在 single-frame DICOM `1500 × 950` 尺寸；部分已 ratio 化但未全面盤點
-- **受影響範圍（已知）**：ROI、tracking window、search margin、smoothing 區間、excursion 計算
-- **拆解（草案）**：
-  - **Patch A**：grep 全 repo 抓出 hardcode pixel constants → 產出清單（哪個 module 已 ratio、哪個還沒）
-  - **Patch B**：擬定 unified normalization strategy（image-relative ratio / metadata-driven）
-  - **Patch C-N**：按優先序逐項 ratio 化（每個 module 一 patch）
+- **落地 patch**：
+  - **Patch 10A**：盤點 + 撰寫 `docs/notes/size_normalization_pre_ratio_audit.md`（SNAPSHOT）
+  - **Patch 10B**：`motion_curve` jump_threshold / fix_search_window ratio 化
+  - **Patch 10C**：`excursion` peak_min_distance / midline_min_distance ratio 化
+- **驗證結果**：1500×955 ref 尺寸下逐 pixel 等價舊 hardcode（round 還原）；2026-05-25 實機驗證通過
+- **連動 Patch 13C**：`visualization/info_display.py` 全 px / scale 改 height-ratio（ref 1500×955）；統一 ratio 化原則
 - **連動議題**：
   - **Multi-frame resize 決策**：是否將 multi-frame 統一 resize 至 1500×950？
     - Pros：single/multi 共用一套 pipeline、降低參數維護成本、tracking/ROI 一致
@@ -165,8 +166,8 @@
   - **Visualization output resize**：是否讓 viz 輸出可獨立 resize（demo / realtime 用）？
     - 必須與 algorithm processing size **嚴格分離**，避免 viz resize 汙染核心計算
 
-### Step 10 — Multi-frame Excursion 模式擴充（**規劃中**）
-- **狀態**：⬜ 未開始
+### Step 10 — Multi-frame Excursion 模式擴充（**進行中**）
+- **狀態**：🚧 GLOBAL_WINDOW 已落地，REALTIME 仍探索
 - **本質**：multi-frame = 多次 single-frame 結果組合
 - **拆解為兩種模式**：
 
@@ -175,7 +176,7 @@
 | Mode | 整合進度 | 對應 patch |
 |---|---|---|
 | `LEGACY` | ✅ 已整合進 main.py | 11A（cfg） + 11C-LEGACY（main 接 `legacy_frame_indices`） |
-| `GLOBAL_WINDOW` | ⬜ 設計 backup 中 | 11B（拼接邏輯）+ 11C-GW（main 整合）|
+| `GLOBAL_WINDOW` | ✅ 主流程已落地 | 11B（拼接邏輯）+ 11B'（兩段獨立）+ 11C-GW（main 整合）+ 11D（global final viz） |
 | `REALTIME` | ⬜ 探索階段 | 未來 |
 
 #### 模式一：Global Window 拼接
@@ -199,6 +200,18 @@
   - rolling excursion calculation
   - realtime-compatible signal normalization
 - **狀態**：探索 / 設計階段，未動工
+
+### Step 11 — Cfg 精煉與 ratio 化擴展（**進行中**）
+
+整合零碎改進；每個 patch 獨立 commit。
+
+| Patch | 主題 | 狀態 |
+|---|---|---|
+| 12A | 刪 `RunConfig` + 建 `RunBundle`；`use_segment_label` 搬至 `RoiBandConfig` | ✅ |
+| 13A | 抽 `DicomCropConfig`；`apply_dicom_crop(seq, cfg)` 強制吃 cfg | ✅ |
+| 13C | `algorithm/excursion/aggregator.py` stub；`info_display` 全 px 改 height-ratio + 多 peak markers + 簽名改吃 `List[PeakInfo]` | ✅ |
+
+**Patch 13B（取消）**：原計畫把 paddle model 路徑搬出 `paddleseglibs/predict.py`；發現 `PaddleSegSegmenterConfig` 已將 `config_path / model_path / save_dir` 暴露為欄位，user 可直接 override，預設值放哪不影響使用體驗。
 
 ---
 
@@ -226,6 +239,17 @@
 - Step 7 — Patch 9E：PipelineVisualizer + main 整合 + 刪 patch_code/excursion_rule/debug；stable_peak 搬到 algorithm/signal_processing/
 - Step 7 — Patch 9F：info_display.py 搬入 visualization/ + 重構修 2 bug；final overlay 改用 as_color base + excursion_info_display
 - Step 7 — Patch 9G：Final overlay 元素 toggles（motion_curve / peak_markers / excursion_text）；excursion_info_display 加 show_text 參數解耦
+- Step 9 — Patch 10A：盤點 hardcode pixel constants → `docs/notes/size_normalization_pre_ratio_audit.md`
+- Step 9 — Patch 10B：`motion_curve` jump_threshold / fix_search_window ratio 化
+- Step 9 — Patch 10C：`excursion` peak_min_distance / midline_min_distance ratio 化
+- Step 10 — Patch 11A：`MultiframeConfig` + `MultiframeMode` + `KeyframeStrategy` + frame_selection helpers
+- Step 10 — Patch 11B / 11B'：`algorithm/multiframe/global_window.py`（拼接 + 全局 excursion；兩段獨立 stitching）
+- Step 10 — Patch 11C-LEGACY：main.py mode dispatch；`legacy_frame_indices` 過濾生效
+- Step 10 — Patch 11C-GW：main.py GLOBAL_WINDOW 整合（2 keyframe → 拼接 → 全局 excursion）
+- Step 10 — Patch 11D：`visualization/global_window.py`（`render_global_final`）
+- Step 11 — Patch 12A：刪 `RunConfig` + 建 `RunBundle`；`use_segment_label` 搬至 `RoiBandConfig`
+- Step 11 — Patch 13A：抽 `DicomCropConfig`；`apply_dicom_crop(seq, cfg)` 強制吃 cfg
+- Step 11 — Patch 13C：`aggregate_measurements` stub；`info_display` height-ratio 化 + 多 peak markers + 簽名改吃 `List[PeakInfo]`
 
 ---
 
@@ -264,40 +288,41 @@
 
 下次開新 session 時直接看這段：
 
-1. **當前狀態**：
-   - Step 7（viz 統整 9A-9G）全部完成 — Step 7 viz 已驗證
-   - Step 9（ratio化 10A-10C）全部完成 — **等待 2026-05-25（週一）實機驗證**
-   - CLAUDE.md v1.1 與 Claude memory 機制建立完成
-   - Step 9 / Step 10 規劃已整入本檔（取自 `下一步.txt` / `下下一步.txt`）
+### 1. 當前狀態（2026-05-25）
 
-⚠️ **2026-05-25 週一驗證項**：跑 `python main.py`，預期 log 與 Patch 9G 後 byte-identical（標準 1500×955 影像）。Step 9 三 patch 對 canonical 尺寸 round() 還原為原 hardcode pixel 值，理論上零行為差異。**已驗證通過**。
+- **Step 1-7**：✅ 全部完成且驗證
+- **Step 9（ratio 化 10A-10C）**：✅ 完成 + 實機驗證通過
+- **Step 10（Multi-frame）**：
+  - GLOBAL_WINDOW（11A-11D）✅ 主流程落地
+  - REALTIME ⬜ 探索階段
+- **Step 11（cfg 精煉）**：
+  - 12A ✅ RunBundle 取代 RunConfig
+  - 13A ✅ DicomCropConfig 抽出
+  - 13C ✅ info_display ratio 化 + aggregator stub
+  - 13B 已取消（PaddleSegSegmenterConfig 早已暴露 path 欄位）
 
-📌 **Patch 11C-LEGACY 已落地**：main.py 接 `bundle.multiframe.legacy_frame_indices` 過濾 for-loop。預設 None=全跑（與舊行為一致）；設成 `[140]` 等 list 就只跑指定 frame。GLOBAL_WINDOW / REALTIME mode 設成會 raise NotImplementedError（明確告知未整合）。
+### 2. 待 user 評估 / 驗證項
 
-📌 **Patch 13A 已落地**：`DicomCropConfig` 抽至 `config/dicom_crop_config.py`；掛上 `RunBundle.dicom_crop`；`apply_dicom_crop(seq, cfg)` 簽名強制吃 cfg。main.py 把 bundle 建立移到 crop call 之前。預設值不變（ruler=20 / black_padding=0）。
+- **Patch 13C 視覺**：`python main.py`（GLOBAL_WINDOW default 或切 LEGACY），查 `output/global/final.png` 或 `output/final/`。多 peak 案例下 markers 擁擠程度、ratio 化在 1500×955 ref 是否逐 pixel 一致（理論等價）
+- **Aggregator 聚合規則**：目前 stub 回第 0 組；待 user 定義（mean / median / max-excursion / first 等）→ 落地時加 `AggregatorConfig` 並接 cfg
+- **`config/multiframe_config.py` default mode**：user 在 working tree 切回 LEGACY 未 commit；長期需處理「config 個人偏好不進 commit」的 workflow 機制（候選：local override 檔 / `--assume-unchanged` / CLI flags）
 
-📌 **Patch 13C 已落地**：
-- `algorithm/excursion/aggregator.py` 新增 `aggregate_measurements(measurements) -> Optional[PeakInfo]` stub（暫 fallback 第 0 組；待定義聚合規則後加 cfg）
-- `visualization/info_display.py` 全部 px / scale 常數改 height-ratio（ref 1500×955）；簽名 `excursion_info_display(figure, measurements: List[PeakInfo], ...)`；markers 改 for-loop 跑每組 PeakInfo；大文字塊吃 aggregator
-- `pipeline_visualizer._to_peaks_info` 中介層移除；caller 直接傳 measurements
-- ref 解析度下行為與舊版逐 pixel 等價（ratio × 955 round 回原 hardcode）
-- ⚠️ 多 peak 視覺擁擠待 user 評估；aggregator 聚合規則待 user 定義（mean / median / max / first 等）
-2. **驗證指令**（Step 7 收尾未驗）：
-   - 預設關 viz 跑一次：`python main.py`，log 應與 Patch 8 完全一致（零 `output/` 副作用）
-   - 開 viz 跑一次：手動把 `viz_cfg = VisualizationConfig()` 改成 `VisualizationConfig(enabled=True, save_final=True, save_debug=True)`，看 `output/final/` 與 `output/debug/{stage}/` 內容
-3. **目前 repo 狀態**：
-   - root：`main.py` / `utils.py` / `CLAUDE.md` / `PROGRESS.md` + 個人筆記（`下一步.txt` / `下下一步.txt` / `過去專案參考md/`）
-   - 架構分層：`input/` + `algorithm/` + `config/` + `visualization/` + `paddleseglibs/`
-   - 尚未 `git init`；user 即將上 git 開始增量開發
-4. **候選下一步（順序建議）**：
-   - **A. Step 7 實機驗證**（建議先做）：跑 viz on/off 兩次確認
-   - **B. 上 git**（建議在 A 之後）：第一次 commit 整個 refactor 里程碑 + CLAUDE.md v1
-   - **C. Step 9 — Size Normalization Audit**（Patch A：grep 盤點 hardcode pixel）
-   - **D. Step 10 — Multi-frame Mode 1**（依賴 C 完成度）
-   - **E. Step 10 — Multi-frame Mode 2**（探索階段，長期）
-   - **F. Sniff 路徑 `segment_way`**（會啟用 scale_x → time/velocity）
-   - **G. Step 8 — byte-equivalence 驗證 script 實跑**（暫緩中）
-5. **既有規約**：CLAUDE.md（本 repo）+ 母 CLAUDE.md 重點繼承；patch confirm-then-execute；commit/push 由用戶 `/commit` 觸發
+### 3. 候選下一步
+
+| 候選 | 主題 | 備註 |
+|---|---|---|
+| A | Aggregator 聚合規則定義 + cfg 化 | 13C 收尾延伸 |
+| B | Config 個人 override 機制（local config / env / CLI） | 解決 multiframe_config.py 反覆改的問題 |
+| C | Sniff phase `segment_way` 路徑 | 會啟用 scale_x → time/velocity |
+| D | Step 10 REALTIME mode 探索 | 長期 |
+| E | Step 8 byte-equivalence 驗證 script | 暫緩中 |
+
+### 4. 規約 / 機制
+
+- CLAUDE.md（本 repo）+ 母 CLAUDE.md 重點繼承
+- 每個 patch confirm-then-execute（§3 工作節奏）
+- **commit-per-patch**：每個小 patch 獨立 commit；不可 bundle 多個 patch；commit/push 由用戶 `/commit` 觸發
+- AI 動檔完成後做 AST parse + import smoke test；實機驗證由 user 跑 main.py
 
 ---
 
