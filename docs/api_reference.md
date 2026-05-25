@@ -11,7 +11,7 @@
 | 項目 | 值 |
 |---|---|
 | Tier | SNAPSHOT |
-| 版本 | 0.3 |
+| 版本 | 0.7 |
 | 最後更新 | 2026-05-25 |
 | 校對對象 | `config/*.py`、`algorithm/**/*.py`、`input/**/*.py`、`visualization/**/*.py` |
 | 狀態 | snapshot |
@@ -113,6 +113,7 @@ class Phase(Enum):
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
 | `segmenter` | `PaddleSegSegmenterConfig` | default | paddle 模型 cfg |
+| `dicom_crop` | `DicomCropConfig` | default | DICOM region crop cfg |
 | `detection` | `DiaphragmDetectionConfig` | default | 偵測 cfg |
 | `roi_band` | `RoiBandConfig` | default | ROI band cfg（含 `use_segment_label`） |
 | `motion_curve` | `MotionCurveConfig` | default |  |
@@ -166,6 +167,17 @@ class KeyframeStrategy(Enum):
 | `stitch_length_px_second` | `Optional[int]` | `None` | None=自動算 `(idx[1]-idx[0])×stride`；override 直接設 |
 
 > 視窗 pixel 公式為 multi-frame 實驗結果；理論上不會有超過 2 keyframe 的維度擴展。
+
+### §1.9 `DicomCropConfig`
+
+`config/dicom_crop_config.py`
+
+| 欄位 | 型別 | 預設 | 說明 |
+|---|---|---|---|
+| `ruler` | `int` | `20` | 上方 / 左側留白寬度（pixel）|
+| `black_padding` | `int` | `0` | 左側額外 padding（pixel）|
+
+掛在 `RunBundle.dicom_crop`；對應 `apply_dicom_crop(seq, cfg)`。
 
 ---
 
@@ -314,7 +326,7 @@ class KeyframeStrategy(Enum):
 | Function | Signature | Returns | 用途 |
 |---|---|---|---|
 | `load` | `(path: str)` | `FrameSequence` | 依路徑類型分派 reader |
-| `apply_dicom_crop` | `(seq, ruler=40, black_padding=50)` | `FrameSequence` | DCM region_location 裁切；非 DCM no-op |
+| `apply_dicom_crop` | `(seq, cfg: DicomCropConfig)` | `FrameSequence` | DCM region_location 裁切；非 DCM no-op |
 
 ### §3.2 Segmentation
 
@@ -350,6 +362,7 @@ class KeyframeStrategy(Enum):
 |---|---|---|---|
 | `brightness_way` | `(diaphragm_mask, diaphragm_p_4crest, diaphragm_p_4trough, diaphragm_ori_y_value, config)` | `ExcursionResult` | midline + rule + boundary refine |
 | `compute_peak_info` | `(crest, trough, scale_y=None, scale_x=None)` | `PeakInfo` | None-safe 物理量計算 |
+| `aggregate_measurements` | `(measurements: List[PeakInfo])` | `Optional[PeakInfo]` | 多組 → 單值聚合 stub（暫 fallback 第 0 組）|
 
 ### §3.7 Multi-frame
 
@@ -372,7 +385,7 @@ class KeyframeStrategy(Enum):
 |---|---|---|---|
 | `PipelineVisualizer.__init__` | `(cfg, excursion_config)` | — |  |
 | `PipelineVisualizer.render_frame` | `(frame_idx, image_gray, image_color, seg_mask, frame_result)` | `None` | disabled 時零 I/O |
-| `excursion_info_display` | `(figure, peaks_info, font_path=..., peak='ct', show_text=True)` | `np.ndarray` | crest/trough markers + 自訂字 |
+| `excursion_info_display` | `(figure, measurements: List[PeakInfo], font_path=..., peak='ct', show_text=True)` | `np.ndarray` | 多 peak markers + 自訂字；px / 字型按 image height ratio 化（ref 1500×955）|
 | `render_global_final` | `(global_result, image_color_first, image_color_second, cfg, excursion_cfg)` | `None` | GLOBAL_WINDOW final overlay；風格沿用 single-frame |
 
 ---
@@ -403,3 +416,5 @@ class KeyframeStrategy(Enum):
 | 2026-05-25 | 0.3 | §1.8 keyframe default `[88,149]` → `[87,149]`；§2.9 GlobalExcursionResult 完整欄位；§3.7 `run_global_window` 簽名實落地 | Patch 11B：GLOBAL_WINDOW 邏輯落地 |
 | 2026-05-25 | 0.4 | §1.8 `stitch_length_px` 拆 `stitch_length_px_first` + `stitch_length_px_second`；§2.9 `first_segment_len_px` / `second_segment_len_px` 取代舊欄位；移除具體 keyframe / pixel 數字（experiment 值） | Patch 11B'：stitching 邏輯改為兩段獨立 |
 | 2026-05-25 | 0.5 | §3.9 加 `render_global_final` | Patch 11D：GLOBAL_WINDOW final overlay |
+| 2026-05-25 | 0.6 | §1.9 新增 `DicomCropConfig`；§1.6 RunBundle 加 `dicom_crop`；§3.1 `apply_dicom_crop` 簽名改吃 cfg；header 版號補 bump 對齊變更紀錄 | Patch 13A：dicom_crop 參數抽至 config |
+| 2026-05-25 | 0.7 | §3.6 加 `aggregate_measurements`；§3.9 `excursion_info_display` 簽名改吃 `List[PeakInfo]` + 註記 ratio 化 | Patch 13C：info_display 多 peak + ratio 化 + aggregator stub |

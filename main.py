@@ -128,12 +128,15 @@ def _run_single_frame(
 
 
 def run(image_path: str, phase: Phase = Phase.EXCURSION):
-    # 1. Load + crop
+    # 1. 配置聚合（先建 bundle 給 crop 用；for_phase 只代 detection，其他用 default）
+    bundle = RunBundle.for_phase(phase)
+
+    # 2. Load + crop
     seq = load(image_path)
     print(f"[input] source_type={seq.source_type}, "
           f"frames.shape={seq.frames.shape}, fps={seq.fps}")
 
-    seq = apply_dicom_crop(seq)
+    seq = apply_dicom_crop(seq, bundle.dicom_crop)
     print(f"[preprocess] cropped frames.shape={seq.frames.shape}")
 
     if seq.source_type == 'png_dir':
@@ -141,9 +144,6 @@ def run(image_path: str, phase: Phase = Phase.EXCURSION):
             "PNG dir → segmenter 整合尚未完成。需後續 patch 把 inner predict "
             "改為優先使用 pixel_array、不再 by-extension dispatch。"
         )
-
-    # 2. 配置聚合（一行 init 全部 cfg；for_phase 只代 detection，其他用 default）
-    bundle = RunBundle.for_phase(phase)
 
     # 3. Segmenter（lazy load；model 只 load 一次）
     segmenter = PaddleSegSegmenter(bundle.segmenter)

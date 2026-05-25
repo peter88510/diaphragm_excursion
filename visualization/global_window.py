@@ -14,7 +14,7 @@ from algorithm.multiframe.global_window import GlobalExcursionResult
 from config import ExcursionConfig, VisualizationConfig
 from visualization.info_display import excursion_info_display
 from visualization.io import global_final_path, save_png, should_save_final
-from visualization.pipeline_visualizer import _FINAL_MOTION_COLOR, _to_peaks_info
+from visualization.pipeline_visualizer import _FINAL_MOTION_COLOR
 
 
 def render_global_final(
@@ -44,7 +44,7 @@ def render_global_final(
     if global_result.measurements and (wants_markers or wants_text):
         canvas = excursion_info_display(
             figure=canvas,
-            peaks_info=_to_peaks_info(global_result.measurements),
+            measurements=global_result.measurements,
             font_path=cfg.final_font_path,
             peak='ct' if wants_markers else '',
             show_text=wants_text,

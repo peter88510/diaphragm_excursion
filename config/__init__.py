@@ -1,4 +1,5 @@
 from config.diaphragm_detection_config import DiaphragmDetectionConfig, Phase
+from config.dicom_crop_config import DicomCropConfig
 from config.excursion_config import ExcursionConfig
 from config.motion_curve_config import MotionCurveConfig
 from config.multiframe_config import (
@@ -15,6 +16,7 @@ __all__ = [
     "PaddleSegSegmenterConfig",
     "DiaphragmDetectionConfig",
     "Phase",
+    "DicomCropConfig",
     "RoiBandConfig",
     "MotionCurveConfig",
     "ExcursionConfig",

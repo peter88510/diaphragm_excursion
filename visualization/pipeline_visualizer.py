@@ -91,29 +91,10 @@ class PipelineVisualizer:
         if frame_result.measurements and (wants_markers or wants_text):
             canvas = excursion_info_display(
                 figure=canvas,
-                peaks_info=_to_peaks_info(frame_result.measurements),
+                measurements=frame_result.measurements,
                 font_path=self.cfg.final_font_path,
                 peak='ct' if wants_markers else '',
                 show_text=wants_text,
             )
 
         return canvas
-
-
-def _to_peaks_info(measurements):
-    """List[PeakInfo] → legacy peaks_info dict 格式，供 excursion_info_display 使用。
-
-    legacy 格式：
-        {idx: {"trough": {"x", "y"}, "crest": {"x", "y"},
-               "velocity", "excursion", "time_sec"}}
-    """
-    return {
-        i: {
-            "trough": {"x": m.trough[0], "y": m.trough[1]},
-            "crest": {"x": m.crest[0], "y": m.crest[1]},
-            "velocity": m.velocity,
-            "excursion": m.excursion_cm,
-            "time_sec": m.time_sec,
-        }
-        for i, m in enumerate(measurements)
-    }

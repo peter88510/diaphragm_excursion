@@ -71,7 +71,7 @@ from algorithm.motion_curve import extract_motion_curve, MotionCurveResult
 
 # excursion
 from algorithm.excursion import (
-    brightness_way, compute_peak_info,
+    brightness_way, compute_peak_info, aggregate_measurements,
     ExcursionResult, ExcursionBatch, PeakInfo,
 )
 
@@ -205,8 +205,8 @@ from algorithm import FrameResult
 
 | 維度 | 內容 |
 |---|---|
-| **檔案** | `brightness.py`（`brightness_way` + `ExcursionResult` + `ExcursionBatch`）/ `midline.py`（`find_midline`）/ `rules.py`（`excursion_rule`）/ `boundary.py`（`find_boundary`）/ `measurement.py`（`compute_peak_info` + `PeakInfo`） |
-| **入口** | `brightness_way()` + `compute_peak_info()` |
+| **檔案** | `brightness.py`（`brightness_way` + `ExcursionResult` + `ExcursionBatch`）/ `midline.py`（`find_midline`）/ `rules.py`（`excursion_rule`）/ `boundary.py`（`find_boundary`）/ `measurement.py`（`compute_peak_info` + `PeakInfo`）/ `aggregator.py`（`aggregate_measurements`） |
+| **入口** | `brightness_way()` + `compute_peak_info()` + `aggregate_measurements()` |
 | **依賴 config** | `ExcursionConfig`（`peak_min_distance_ratio` / `peak_prominence` / `midline_min_distance_ratio` / `excursion_rule_start_range` / `excursion_rule_end_range`）|
 
 #### `brightness_way()` 流程
@@ -233,6 +233,13 @@ from algorithm import FrameResult
 - `time_sec=0` 或 `excursion_cm=None` → `velocity=None`
 
 main.py excursion phase **不傳 scale_x** → `time_sec / velocity` 為 None；只計算 `excursion_cm`。
+
+#### `aggregate_measurements()`
+
+`List[PeakInfo] → Optional[PeakInfo]`；多組 → 單值聚合接口。
+
+目前為 stub：fallback 回第 0 組。具體聚合規則（mean / median / max-excursion / first 等）待定義，
+落地後加 cfg 切換。用於 GLOBAL_WINDOW / multi-batch 場景的 final overlay 大文字塊。
 
 #### 設計重點
 
@@ -353,3 +360,4 @@ main.py       → algorithm   (orchestration)
 | 2026-05-25 | — | §4.3 / §5 cfg 引用：`RunConfig.use_segment_label` → `RoiBandConfig.use_segment_label` | Patch 12A：RunConfig 已刪 |
 | 2026-05-25 | — | §4.6 LEGACY 標 ✅ 11A + 11C-LEGACY；GLOBAL_WINDOW 改 11C-GW | Patch 11C-LEGACY 落地 |
 | 2026-05-25 | — | §4.6 GLOBAL_WINDOW 邏輯標 ✅ 11B；keyframe default `[87, 149]` | Patch 11B 邏輯落地 |
+| 2026-05-25 | — | §4.5 加 `aggregate_measurements` stub；import 範例同步 | Patch 13C：info_display 多 peak + aggregator 接口 |

@@ -10,6 +10,7 @@
 from dataclasses import dataclass, field
 
 from config.diaphragm_detection_config import DiaphragmDetectionConfig, Phase
+from config.dicom_crop_config import DicomCropConfig
 from config.excursion_config import ExcursionConfig
 from config.motion_curve_config import MotionCurveConfig
 from config.multiframe_config import MultiframeConfig
@@ -21,6 +22,7 @@ from config.visualization_config import VisualizationConfig
 @dataclass
 class RunBundle:
     segmenter: PaddleSegSegmenterConfig = field(default_factory=PaddleSegSegmenterConfig)
+    dicom_crop: DicomCropConfig = field(default_factory=DicomCropConfig)
     detection: DiaphragmDetectionConfig = field(default_factory=DiaphragmDetectionConfig)
     roi_band: RoiBandConfig = field(default_factory=RoiBandConfig)
     motion_curve: MotionCurveConfig = field(default_factory=MotionCurveConfig)

@@ -273,6 +273,15 @@
 ⚠️ **2026-05-25 週一驗證項**：跑 `python main.py`，預期 log 與 Patch 9G 後 byte-identical（標準 1500×955 影像）。Step 9 三 patch 對 canonical 尺寸 round() 還原為原 hardcode pixel 值，理論上零行為差異。**已驗證通過**。
 
 📌 **Patch 11C-LEGACY 已落地**：main.py 接 `bundle.multiframe.legacy_frame_indices` 過濾 for-loop。預設 None=全跑（與舊行為一致）；設成 `[140]` 等 list 就只跑指定 frame。GLOBAL_WINDOW / REALTIME mode 設成會 raise NotImplementedError（明確告知未整合）。
+
+📌 **Patch 13A 已落地**：`DicomCropConfig` 抽至 `config/dicom_crop_config.py`；掛上 `RunBundle.dicom_crop`；`apply_dicom_crop(seq, cfg)` 簽名強制吃 cfg。main.py 把 bundle 建立移到 crop call 之前。預設值不變（ruler=20 / black_padding=0）。
+
+📌 **Patch 13C 已落地**：
+- `algorithm/excursion/aggregator.py` 新增 `aggregate_measurements(measurements) -> Optional[PeakInfo]` stub（暫 fallback 第 0 組；待定義聚合規則後加 cfg）
+- `visualization/info_display.py` 全部 px / scale 常數改 height-ratio（ref 1500×955）；簽名 `excursion_info_display(figure, measurements: List[PeakInfo], ...)`；markers 改 for-loop 跑每組 PeakInfo；大文字塊吃 aggregator
+- `pipeline_visualizer._to_peaks_info` 中介層移除；caller 直接傳 measurements
+- ref 解析度下行為與舊版逐 pixel 等價（ratio × 955 round 回原 hardcode）
+- ⚠️ 多 peak 視覺擁擠待 user 評估；aggregator 聚合規則待 user 定義（mean / median / max / first 等）
 2. **驗證指令**（Step 7 收尾未驗）：
    - 預設關 viz 跑一次：`python main.py`，log 應與 Patch 8 完全一致（零 `output/` 副作用）
    - 開 viz 跑一次：手動把 `viz_cfg = VisualizationConfig()` 改成 `VisualizationConfig(enabled=True, save_final=True, save_debug=True)`，看 `output/final/` 與 `output/debug/{stage}/` 內容

@@ -1,3 +1,4 @@
+from algorithm.excursion.aggregator import aggregate_measurements
 from algorithm.excursion.boundary import find_boundary
 from algorithm.excursion.brightness import (
     ExcursionBatch,
@@ -17,4 +18,5 @@ __all__ = [
     "find_boundary",
     "PeakInfo",
     "compute_peak_info",
+    "aggregate_measurements",
 ]
