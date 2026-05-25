@@ -1,0 +1,65 @@
+# ============================================================
+# diaphragm_excursion .gitignore
+# ============================================================
+
+# --- Python build cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# --- Claude Code session data (per-machine, 不入 git) ---
+.claude/
+
+# --- Visualization runtime outputs ---
+output/
+
+# --- Personal notes (not part of code) ---
+下一步.txt
+下下一步.txt
+過去專案參考md/
+
+# --- IDE / Editor (root only; paddleseglibs/.idea/ is vendored 內含，保留) ---
+/.idea/
+/.vscode/
+*.swp
+*.swo
+*~
+
+# --- OS noise ---
+.DS_Store
+Thumbs.db
+
+# --- Secrets (preventive; 永遠不該 commit) ---
+.env
+.env.*
+*.key
+*.pem
+credentials.json
+secrets.yaml
+secrets.yml
+
+# --- Medical data (病患資料嚴禁入 git) ---
+*.dcm
+*.dicom
+
+# --- Python virtual envs ---
+/venv/
+/.venv/
+/env/
+
+# --- Build / Distribution artifacts ---
+build/
+dist/
+*.whl
+
+# --- Paddle vendored runtime artifacts ---
+# Model weights (5 × 323MB) 與訓練 log；clone 後需另外取得模型
+# 詳見 README §3 Quick Start
+paddleseglibs/output/
+*.pdparams
+*.pdmodel
+*.pdiparams
+*.pdopt
+vdlrecords.*.log

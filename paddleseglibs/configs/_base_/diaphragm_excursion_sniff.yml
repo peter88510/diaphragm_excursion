@@ -1,0 +1,46 @@
+batch_size: 1
+iters: 80000
+
+train_dataset:
+  type: Dataset
+  dataset_root: paddleseglibs/data/diaphragm_excursion_sniff/
+  train_path: paddleseglibs/data/diaphragm_excursion_sniff/train.txt
+  num_classes: 2
+  transforms:
+    - type: ResizeStepScaling
+      min_scale_factor: 0.5
+      max_scale_factor: 2.0
+      scale_step_size: 0.25
+    - type: RandomPaddingCrop
+      crop_size: [512, 512]
+    #- type: RandomHorizontalFlip
+    - type: Normalize
+  mode: train
+
+val_dataset:
+  type: Dataset
+  dataset_root: paddleseglibs/data/diaphragm_excursion_sniff/
+  val_path: paddleseglibs/data/diaphragm_excursion_sniff/sniff_test2.txt
+  num_classes: 2
+  transforms:
+    - type: Resize
+      target_size: [ 512, 512 ]
+    - type: Normalize
+  mode: val
+  
+
+optimizer:
+  type: sgd
+  momentum: 0.9
+  weight_decay: 4.0e-5
+
+lr_scheduler:
+  type: PolynomialDecay
+  learning_rate: 0.00125
+  end_lr: 0
+  power: 0.9
+
+loss:
+  types:
+    - type: CrossEntropyLoss
+  coef: [1]
