@@ -15,6 +15,8 @@ Multi-frame dispatch（依 MultiframeConfig.mode）：
     LEGACY        : per-frame loop（傳統行為）
     GLOBAL_WINDOW : 抽 2 keyframe → 各跑 single-frame → run_global_window 拼接 → global final viz
 """
+from typing import Optional
+
 import cv2
 import numpy as np
 
@@ -127,9 +129,14 @@ def _run_single_frame(
     return result
 
 
-def run(image_path: str, phase: Phase = Phase.EXCURSION):
-    # 1. 配置聚合（先建 bundle 給 crop 用；for_phase 只代 detection，其他用 default）
-    bundle = RunBundle.for_phase(phase)
+def run(
+    image_path: str,
+    phase: Phase = Phase.EXCURSION,
+    bundle: Optional[RunBundle] = None,
+):
+    # 1. 配置聚合（外部可注入 bundle；None 時用 for_phase canonical default）
+    if bundle is None:
+        bundle = RunBundle.for_phase(phase)
 
     # 2. Load + crop
     seq = load(image_path)
@@ -263,8 +270,11 @@ def _run_global_window(
 
 
 if __name__ == "__main__":
-    image_path = (
-        r"E:\PeterMC_Tsai\Diaphragm_data\Quality_Classification_base_up_down\Dicom_ex"
-        r"\Excursion-QB\26_0511\1776049685152\20260511\Peter_Quiet_1.dcm"
-    )
-    run(image_path)
+    try:
+        import run_config as rc
+    except ImportError:
+        raise SystemExit(
+            "缺 run_config.py — 請複製 run_config.example.py 為 run_config.py "
+            "並填入 IMAGE_PATH"
+        )
+    run(rc.IMAGE_PATH, bundle=rc.build_bundle())

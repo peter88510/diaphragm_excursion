@@ -20,6 +20,9 @@ output/
 下下一步.txt
 過去專案參考md/
 
+# --- Personal run config (per-machine 路徑 + 實驗 override；模板見 run_config.example.py) ---
+run_config.py
+
 # --- IDE / Editor (root only; paddleseglibs/.idea/ is vendored 內含，保留) ---
 /.idea/
 /.vscode/
