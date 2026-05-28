@@ -26,6 +26,16 @@ def global_final_path(cfg: VisualizationConfig) -> Path:
     return cfg.output_dir / "global" / "final.png"
 
 
+def realtime_canvas_path(cfg: VisualizationConfig, frame_idx: int) -> Path:
+    """REALTIME mode 的當下視窗 track（逐 frame）。"""
+    return cfg.output_dir / "realtime" / "canvas" / f"{frame_idx:04d}.png"
+
+
+def realtime_global_path(cfg: VisualizationConfig, frame_idx: int) -> Path:
+    """REALTIME mode 的累積拼接 track（逐 frame）。"""
+    return cfg.output_dir / "realtime" / "global" / f"{frame_idx:04d}.png"
+
+
 def debug_path(cfg: VisualizationConfig, stage: str, frame_idx: int) -> Path:
     # stage 是內部常數，但會落到檔案系統 — 做基本 sanitize 防意外字元（CLAUDE.md §9）
     safe = stage.replace("_", "").replace("-", "")
@@ -36,6 +46,10 @@ def debug_path(cfg: VisualizationConfig, stage: str, frame_idx: int) -> Path:
 
 def should_save_final(cfg: VisualizationConfig) -> bool:
     return cfg.enabled and cfg.save_final
+
+
+def should_save_realtime(cfg: VisualizationConfig) -> bool:
+    return cfg.enabled and cfg.save_realtime
 
 
 def should_save_debug(cfg: VisualizationConfig, stage: str) -> bool:

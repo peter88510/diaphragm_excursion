@@ -27,6 +27,9 @@ class VisualizationConfig:
     save_final: bool = True
     save_debug: bool = False
 
+    # REALTIME mode 專屬 track（canvas + global 雙輸出；enabled=True 時才生效）
+    save_realtime: bool = False
+
     # None = 全部已知 stage；set = 只存這幾個（名稱見 visualization.stages）
     debug_stages: Optional[FrozenSet[str]] = None
 
