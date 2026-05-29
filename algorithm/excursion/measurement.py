@@ -1,6 +1,6 @@
 """Peak/Trough 位置 → 物理量計算（excursion_cm / time_sec / velocity）。
 
-對應原 utils.excursion_time_calculator，重整後：
+重構自舊版 root util 的 excursion_time_calculator，重整後：
   - 5-tuple 回傳 → PeakInfo dataclass
   - velocity div-by-zero 安全處理（返 None 而非 crash）
   - 移除 `print("[][][] SCALE Y ...")` 噪音

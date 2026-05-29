@@ -1,6 +1,6 @@
 """用 diaphragm segmentation mask 修正 peak / trough 位置至實際邊界。
 
-直接搬自 utils.py 的 FindBoundary + find_boundary_v2，邏輯不動：
+重構自舊版 root util 的 FindBoundary + find_boundary_v2，邏輯不動：
   - find_boundary_v2(roi_map, roi_position, m=1)  # m=1 找波峰 / m=-1 找波谷
   - FindBoundary(diaphragm_mask, x_crest, y_crest, x_trough, y_trough)
 

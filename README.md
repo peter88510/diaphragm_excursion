@@ -123,7 +123,6 @@ viz_cfg = VisualizationConfig(enabled=True, save_final=True, save_debug=True)
 ```
 diaphragm_excursion/
 ├── main.py                          orchestration（per-frame loop）
-├── utils.py                         legacy utility（待盤點）
 ├── CLAUDE.md                        AI 行為合約（STABLE）
 ├── PROGRESS.md                      進度紀錄（LIVING）
 ├── algorithm/

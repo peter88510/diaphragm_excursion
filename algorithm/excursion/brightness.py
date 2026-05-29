@@ -5,7 +5,7 @@
         ↓ find_peaks                              （只給 debug viz 用）
         ↓ find_midline → crossings, rise_or_decline
         ↓ excursion_rule 依 crossings 數量規則選 peak / trough
-        ↓ find_boundary (utils.FindBoundary)      用 segment mask 修正位置
+        ↓ find_boundary（舊 util FindBoundary 重構）  用 segment mask 修正位置
     回傳 ExcursionResult (含 batches)
 
 差異 vs 原版：
