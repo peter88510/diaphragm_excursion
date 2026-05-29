@@ -63,7 +63,9 @@ class RealtimeTiming:
         layer_a = ["shift", "heavy", "light", "ingest", "viz"]
         layer_b = ["seg_predict", "detect_roi", "motion_curve",
                    "excursion_sf", "pv_render"]
+        layer_c = ["detect_p1", "enhance", "detect_p2", "select"]
         heavy_total = self.totals.get("heavy", 0.0)
+        detect_roi_total = self.totals.get("detect_roi", 0.0)
 
         def _line(stage: str, denom: float) -> Optional[str]:
             n = self.counts.get(stage, 0)
@@ -84,6 +86,11 @@ class RealtimeTiming:
         print("  Layer B: heavy internal breakdown (% heavy)")
         for s in layer_b:
             line = _line(s, heavy_total)
+            if line:
+                print(line)
+        print("  Layer C: detect_roi breakdown (% detect_roi)")
+        for s in layer_c:
+            line = _line(s, detect_roi_total)
             if line:
                 print(line)
 
@@ -123,14 +130,18 @@ def _run_single_frame(
         image_height=gray.shape[0],
         reserve_ratio=bundle.roi_band.reserve_ratio,
     )
+    if timing is not None:
+        timing.record("detect_p1", time.perf_counter() - t0)
 
-    refined = enhanced_search(
+    refined = enhanced_search(           # 內部記 enhance / detect_p2（Layer C）
         image_gray=gray,
         y_band=y_band,
         detection_config=bundle.detection,
         roi_band_config=bundle.roi_band,
+        timing=timing,
     )
 
+    t_sel = time.perf_counter()
     selection = select_target(
         detection_pass1=detection,
         refined=refined,
@@ -139,8 +150,10 @@ def _run_single_frame(
         use_segment_label=bundle.roi_band.use_segment_label,
     )
     if timing is not None:
-        timing.record("detect_roi", time.perf_counter() - t0)
-        t0 = time.perf_counter()
+        now = time.perf_counter()
+        timing.record("select", now - t_sel)
+        timing.record("detect_roi", now - t0)   # rollup（Layer B）
+        t0 = now
 
     motion_curve = extract_motion_curve(
         image=cv2.medianBlur(gray, 7),
