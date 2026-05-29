@@ -63,7 +63,7 @@ def enhanced_search(
     # 2. 第二次 detect 的 config 變體（不重複 preprocessing）
     second_pass_cfg = replace(
         detection_config, filter_top_ratio=0, median_blur=False)
-    detection = detect(enhanced_blurred, second_pass_cfg)
+    detection = detect(enhanced_blurred, second_pass_cfg, timing=timing)
     if timing is not None:
         timing.record("detect_p2", time.perf_counter() - t)
 

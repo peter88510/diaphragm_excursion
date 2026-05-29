@@ -64,6 +64,7 @@ class RealtimeTiming:
         layer_b = ["seg_predict", "detect_roi", "motion_curve",
                    "excursion_sf", "pv_render"]
         layer_c = ["detect_p1", "enhance", "detect_p2", "select"]
+        layer_d = ["binary", "candidates", "curve_fit", "label_loop"]
         heavy_total = self.totals.get("heavy", 0.0)
         detect_roi_total = self.totals.get("detect_roi", 0.0)
 
@@ -90,6 +91,11 @@ class RealtimeTiming:
                 print(line)
         print("  Layer C: detect_roi breakdown (% detect_roi)")
         for s in layer_c:
+            line = _line(s, detect_roi_total)
+            if line:
+                print(line)
+        print("  Layer D: detect() internal, both passes (% detect_roi)")
+        for s in layer_d:
             line = _line(s, detect_roi_total)
             if line:
                 print(line)
@@ -123,7 +129,7 @@ def _run_single_frame(
         timing.record("seg_predict", time.perf_counter() - t0)
         t0 = time.perf_counter()
 
-    detection = detect(gray, bundle.detection, use_segment=seg_mask)
+    detection = detect(gray, bundle.detection, use_segment=seg_mask, timing=timing)
 
     y_band = compute_target_y_range(
         target_y_range=detection.best_region,
