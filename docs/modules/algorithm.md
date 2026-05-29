@@ -253,24 +253,35 @@ main.py excursion phase **不傳 scale_x** → `time_sec / velocity` 為 None；
 
 | 維度 | 內容 |
 |---|---|
-| **檔案** | `frame_selection.py`（`get_legacy_frame_indices` / `get_keyframe_indices` / `_phase_correlate_keyframes` stub）；`global_window.py`（待 Patch 11B） |
+| **檔案** | `frame_selection.py`（keyframe / legacy helpers）；`global_window.py`（`run_global_window` + `GlobalExcursionResult`）；`realtime.py`（`RealtimeState`）；`frame_shift.py`（`estimate_shift` + `ShiftResult`）|
 | **入口** | dispatch helpers，main.py 依 `MultiframeConfig.mode` 走分支 |
-| **依賴 config** | `MultiframeConfig`（mode / strategy / keyframe_indices / stride / `stitch_length_px`） |
+| **依賴 config** | `MultiframeConfig`（mode / keyframe / stride / stitch / `realtime_*` / `ShiftStrategy`） |
 
 #### Modes（三選一）
 
 | Mode | 行為 | 落地 |
 |---|---|---|
-| `LEGACY` | per-frame loop（**default**，等同舊 main.py 行為） | ✅ 11A + 11C-LEGACY；`legacy_frame_indices` 過濾生效 |
-| `GLOBAL_WINDOW` | 抽 2 keyframe → 拼接 → 全局 excursion | ✅ 11B 邏輯（`run_global_window`）；⬜ 11C-GW main.py 整合 |
-| `REALTIME` | shift_x 累加 + partial window 即時更新 | ⬜ 探索階段 |
+| `LEGACY` | per-frame loop（等同舊 main.py 行為） | ✅ 11A + 11C-LEGACY；`legacy_frame_indices` 過濾生效 |
+| `GLOBAL_WINDOW` | 抽 2 keyframe → 拼接 → 全局 excursion（**default**） | ✅ 11B/11B'（`run_global_window`）+ 11C-GW + 11D |
+| `REALTIME` | 逐幀 estimate_shift 變動位移累積 + rolling 全局 excursion；雙 track viz | ✅ 14A-18（`RealtimeState.ingest_frame`）|
 
 #### Keyframe Strategies（GLOBAL_WINDOW 用）
 
 | Strategy | 來源 | 落地 |
 |---|---|---|
-| `FIXED_INDICES` | `cfg.keyframe_indices`（**default** `[87, 149]`） | ✅ |
+| `FIXED_INDICES` | `cfg.keyframe_indices`（experiment 值，default `[86, 149]`） | ✅ |
 | `PHASE_CORRELATE` | `_phase_correlate_keyframes(seq, cfg)` 累加位移算 | ⬜ stub（user 自補） |
+
+#### Shift Strategies（REALTIME 相鄰幀位移；`frame_shift.py`）
+
+| Strategy | 方法 | 輸出 |
+|---|---|---|
+| `FIXED` | 固定 `stride_pixel`（legacy / 低信心 fallback） | 整數 |
+| `TEMPLATE_MATCH` | prev 最右 column 在 curr `matchTemplate` | 整數 px（**default**）|
+| `PHASE_CORRELATE` | `cv2.phaseCorrelate`（Hanning window） | float sub-pixel |
+
+`estimate_shift → ShiftResult`（shift_px forward / raw_shift native / confidence / found）；
+forward = -raw（正=前進、0=delay、負=倒退）；`shift ≤ 0` 或低信心由 main 跳過 ingest。
 
 #### 設計取向
 
@@ -361,3 +372,4 @@ main.py       → algorithm   (orchestration)
 | 2026-05-25 | — | §4.6 LEGACY 標 ✅ 11A + 11C-LEGACY；GLOBAL_WINDOW 改 11C-GW | Patch 11C-LEGACY 落地 |
 | 2026-05-25 | — | §4.6 GLOBAL_WINDOW 邏輯標 ✅ 11B；keyframe default `[87, 149]` | Patch 11B 邏輯落地 |
 | 2026-05-25 | — | §4.5 加 `aggregate_measurements` stub；import 範例同步 | Patch 13C：info_display 多 peak + aggregator 接口 |
+| 2026-05-29 | — | §4.6 REALTIME 標 ✅（`RealtimeState`）；加 `frame_shift.py` / Shift Strategies；keyframe default `[86,149]`；GLOBAL_WINDOW 改 default mode | Patch 14A-18：REALTIME mode 端到端 |

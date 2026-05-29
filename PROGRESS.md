@@ -166,8 +166,8 @@
   - **Visualization output resize**：是否讓 viz 輸出可獨立 resize（demo / realtime 用）？
     - 必須與 algorithm processing size **嚴格分離**，避免 viz resize 汙染核心計算
 
-### Step 10 — Multi-frame Excursion 模式擴充（**進行中**）
-- **狀態**：🚧 GLOBAL_WINDOW 已落地，REALTIME 仍探索
+### Step 10 — Multi-frame Excursion 模式擴充（**已完成**）
+- **狀態**：✅ 三 mode 全部落地並實機驗證
 - **本質**：multi-frame = 多次 single-frame 結果組合
 - **拆解為兩種模式**：
 
@@ -177,7 +177,7 @@
 |---|---|---|
 | `LEGACY` | ✅ 已整合進 main.py | 11A（cfg） + 11C-LEGACY（main 接 `legacy_frame_indices`） |
 | `GLOBAL_WINDOW` | ✅ 主流程已落地 | 11B（拼接邏輯）+ 11B'（兩段獨立）+ 11C-GW（main 整合）+ 11D（global final viz） |
-| `REALTIME` | ⬜ 探索階段 | 未來 |
+| `REALTIME` | ✅ 端到端落地 + 實機驗證 | 14A-18（見下 Step 11 表）|
 
 #### 模式一：Global Window 拼接
 - **目的**：固定視窗策略建立完整 global signal，套既有 excursion 演算法
@@ -187,19 +187,16 @@
 - **流程**：擷取 frame 88 與 frame 149 → 各跑 single-frame 演算法 → frame 149 後半 496 pixel 訊號拼接至前段 → 形成 global signal → 套 excursion 演算法
 - **依賴**：Step 9 size normalization 完成度（拼接需 size 一致）
 
-#### 模式二：Real-time Incremental
+#### 模式二：Real-time Incremental（**已落地** 14A-18）
 - **目的**：模擬 real-time 演示；frame 持續輸入時即時更新 excursion
-- **目前實作基礎**：每 frame 已有 shift_x 計算
-- **核心問題**：
-  - 第一幀為畫面起始，不參與位移；第二幀起每幀新進約 8 pixel
-  - 現有 single-frame 演算法預期完整視窗（如 704 pixel），realtime 每次只新增 8 pixel → 格式不符
-  - 完整第一視窗（704 pixel）累積後才穩定；但 realtime 需求是「未滿視窗也得更新」
-- **設計待解**：
-  - incremental signal update strategy
-  - partial window handling
-  - rolling excursion calculation
-  - realtime-compatible signal normalization
-- **狀態**：探索 / 設計階段，未動工
+- **落地設計**：
+  - frame[0] 探頭起始跳過；frame[i] 取右尾 `shift_px`（estimate_shift 變動位移）累積
+  - 累積 width = Σ shift_px（非固定 stride）；每 N 幀整段 buffer 重做 wavelet 消邊界 artifact
+  - 雙層門檻：`realtime_warmup_frames`（UX）+ `realtime_algorithm_min_width`（安全網）
+  - ShiftStrategy：TEMPLATE_MATCH（整數，default）/ PHASE_CORRELATE（float）/ FIXED；`shift≤0` 或低信心跳過 ingest
+  - 雙 track viz：canvas（frame[i] 底 + global 軌跡右錨定 + 累積邊界虛線）/ global（完整累積）
+  - `RealtimeState.ingest_frame` 為 streaming-ready 接口（未來接真實 stream 只換來源）
+- **待續（未來）**：phase_correlate 實作精修；多 peak aggregator 聚合規則；真實 stream adapter
 
 ### Step 11 — Cfg 精煉與 ratio 化擴展（**進行中**）
 
@@ -210,6 +207,14 @@
 | 12A | 刪 `RunConfig` + 建 `RunBundle`；`use_segment_label` 搬至 `RoiBandConfig` | ✅ |
 | 13A | 抽 `DicomCropConfig`；`apply_dicom_crop(seq, cfg)` 強制吃 cfg | ✅ |
 | 13C | `algorithm/excursion/aggregator.py` stub；`info_display` 全 px 改 height-ratio + 多 peak markers + 簽名改吃 `List[PeakInfo]` | ✅ |
+| 14A | `RealtimeState` 純右尾累積 + 雙層門檻 + wavelet refresh | ✅ |
+| 14B | REALTIME viz 雙 track（canvas + global）+ warmup 文字 | ✅ |
+| 14C | main.py REALTIME dispatch + `_run_realtime` | ✅ |
+| 15 | 統一 config 入口 `run_config.py`（gitignored）+ `run()` 注入 bundle | ✅ |
+| 16 | `frame_shift.py` 變動位移估計（取代固定 stride）；`ShiftStrategy` | ✅ |
+| 17 | canvas 改右錨定滑動視窗（base=frame[i] + global 軌跡最右段）| ✅ |
+| 18 | `rt_show_*` 開關 + 累積邊界洋紅虛線 + viz config 文件化 | ✅ |
+| — | 刪 `utils.py`（4 函式已被分層模組取代）+ 兩支實驗檔移除 | ✅ |
 
 **Patch 13B（取消）**：原計畫把 paddle model 路徑搬出 `paddleseglibs/predict.py`；發現 `PaddleSegSegmenterConfig` 已將 `config_path / model_path / save_dir` 暴露為欄位，user 可直接 override，預設值放哪不影響使用體驗。
 
@@ -250,6 +255,15 @@
 - Step 11 — Patch 12A：刪 `RunConfig` + 建 `RunBundle`；`use_segment_label` 搬至 `RoiBandConfig`
 - Step 11 — Patch 13A：抽 `DicomCropConfig`；`apply_dicom_crop(seq, cfg)` 強制吃 cfg
 - Step 11 — Patch 13C：`aggregate_measurements` stub；`info_display` height-ratio 化 + 多 peak markers + 簽名改吃 `List[PeakInfo]`
+- Step 10 — Patch 14A：`RealtimeState` 純右尾累積 + 雙層門檻 + wavelet refresh
+- Step 10 — Patch 14B：REALTIME viz 雙 track（canvas + global）+ warmup 文字
+- Step 10 — Patch 14C：main.py REALTIME dispatch + `_run_realtime`
+- Step 11 — Patch 15：統一 config 入口 `run_config.py`（gitignored）+ `run()` 注入 bundle
+- Step 10 — Patch 16：`frame_shift.py` 變動位移估計（`estimate_shift` / `ShiftStrategy` / `ShiftResult`）取代固定 stride
+- Step 10 — Patch 17：canvas 改右錨定滑動視窗（base=frame[i] + global 軌跡最右段）
+- Step 10 — Patch 18：`rt_show_*` 開關 + 累積邊界洋紅虛線 + viz config 文件化
+- 清理 — 刪 `utils.py`（4 函式已被分層取代）+ `px_lv_shiftX.py` / `estimate_xshift.py` 實驗檔
+- Step 10 — Patch 14D：SNAPSHOT docs 同步（api_reference 0.8 / pipeline / algorithm.md / INDEX）
 
 ---
 
@@ -288,34 +302,31 @@
 
 下次開新 session 時直接看這段：
 
-### 1. 當前狀態（2026-05-25）
+### 1. 當前狀態（2026-05-29）
 
 - **Step 1-7**：✅ 全部完成且驗證
 - **Step 9（ratio 化 10A-10C）**：✅ 完成 + 實機驗證通過
-- **Step 10（Multi-frame）**：
-  - GLOBAL_WINDOW（11A-11D）✅ 主流程落地
-  - REALTIME ⬜ 探索階段
-- **Step 11（cfg 精煉）**：
-  - 12A ✅ RunBundle 取代 RunConfig
-  - 13A ✅ DicomCropConfig 抽出
-  - 13C ✅ info_display ratio 化 + aggregator stub
-  - 13B 已取消（PaddleSegSegmenterConfig 早已暴露 path 欄位）
+- **Step 10（Multi-frame）**：✅ 三 mode 全落地
+  - LEGACY / GLOBAL_WINDOW（11A-11D）✅
+  - REALTIME（14A-18）✅ 端到端 + 實機驗證（變動位移 / 滑動視窗 / 雙 track / 累積邊界虛線）
+- **Step 11（cfg 精煉）**：12A / 13A / 13C / 15 ✅；13B 取消
+- **config 入口**：`run_config.py`（gitignored）統一個人實驗值，`run()` 注入 bundle（Patch 15）
+- **清理**：`utils.py` + 兩支實驗檔已刪
 
-### 2. 待 user 評估 / 驗證項
+### 2. 待 user 評估 / 後續
 
-- **Patch 13C 視覺**：`python main.py`（GLOBAL_WINDOW default 或切 LEGACY），查 `output/global/final.png` 或 `output/final/`。多 peak 案例下 markers 擁擠程度、ratio 化在 1500×955 ref 是否逐 pixel 一致（理論等價）
-- **Aggregator 聚合規則**：目前 stub 回第 0 組；待 user 定義（mean / median / max-excursion / first 等）→ 落地時加 `AggregatorConfig` 並接 cfg
-- **`config/multiframe_config.py` default mode**：user 在 working tree 切回 LEGACY 未 commit；長期需處理「config 個人偏好不進 commit」的 workflow 機制（候選：local override 檔 / `--assume-unchanged` / CLI flags）
+- **Aggregator 聚合規則**：stub 回第 0 組；待定義（mean / median / max / first）→ 加 `AggregatorConfig`
+- **REALTIME phase_correlate**：`PHASE_CORRELATE` 已可用但精修待驗；`_phase_correlate_keyframes`（GLOBAL_WINDOW keyframe 用）仍 stub
+- **REALTIME streaming adapter**：`ingest_frame` 已 streaming-ready；未來接真實 stream 來源
 
 ### 3. 候選下一步
 
 | 候選 | 主題 | 備註 |
 |---|---|---|
 | A | Aggregator 聚合規則定義 + cfg 化 | 13C 收尾延伸 |
-| B | Config 個人 override 機制（local config / env / CLI） | 解決 multiframe_config.py 反覆改的問題 |
+| B | REALTIME phase_correlate 精修 / 真實 stream adapter | 14 系列延伸 |
 | C | Sniff phase `segment_way` 路徑 | 會啟用 scale_x → time/velocity |
-| D | Step 10 REALTIME mode 探索 | 長期 |
-| E | Step 8 byte-equivalence 驗證 script | 暫緩中 |
+| D | Step 8 byte-equivalence 驗證 script | 暫緩中 |
 
 ### 4. 規約 / 機制
 

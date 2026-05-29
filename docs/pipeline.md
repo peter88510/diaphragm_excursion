@@ -219,7 +219,22 @@ Per `MultiframeConfig.mode` 分三路：
 |---|---|---|
 | `LEGACY` | per-frame loop（同舊 main.py） | ✅ Patch 11A 配置 + 11C-LEGACY main.py 整合；`bundle.multiframe.legacy_frame_indices` 控制要跑的 frame（None=全跑、list=指定）|
 | `GLOBAL_WINDOW` | 抽 keyframe（FIXED_INDICES 或 PHASE_CORRELATE）→ 拼接 → 全局 excursion + final viz | ✅ Patch 11B / 11B' 邏輯 + 11C-GW main.py 整合 + 11D final overlay |
-| `REALTIME` | 增量 shift_x 累加，partial window 即時更新 | ⬜ 探索階段 |
+| `REALTIME` | 逐幀 estimate_shift 變動位移累積 + rolling 全局 excursion；canvas 右錨定滑動視窗 + global 雙 track | ✅ Patch 14A-18：RealtimeState / frame_shift / 雙 track viz |
+
+### REALTIME 累積拼接
+
+```
+frame[0] 探頭起始跳過；frame[i] 取右尾 shift_px（estimate_shift 算的變動位移）
+累積 width = Σ shift_px（非固定 stride）
+
+ShiftStrategy: FIXED（固定 stride）/ TEMPLATE_MATCH（整數 px）/ PHASE_CORRELATE（float）
+shift ≤ 0（delay/倒退）或低信心 → 跳過 ingest（canvas 仍輸出）
+每 N 幀整段 buffer 重做 wavelet（消純右尾 concat 邊界 artifact）
+```
+
+雙層門檻：`realtime_warmup_frames`（UX，標 "warming up"）+ `realtime_algorithm_min_width`（安全網，跳過全局 excursion）。
+
+雙 track：`canvas`（frame[i] 底 + global 軌跡最右段右錨定 + 累積邊界虛線）/ `global`（完整累積拼接）→ `output/realtime/{canvas,global}/`。
 
 ### Keyframe selection（GLOBAL_WINDOW）
 
@@ -297,3 +312,4 @@ excursion_brightness
 | 2026-05-25 | — | §8 GLOBAL_WINDOW 邏輯標 ✅ 11B；keyframe default `[87, 149]`；stitch_length 496 對齊 spec | Patch 11B 邏輯落地 |
 | 2026-05-25 | — | §8 Stitch length 拆兩段獨立（first + second）；移除具體 keyframe / pixel 數字（experiment 值，避免 doc rot） | Patch 11B'：兩段 stitching 邏輯 |
 | 2026-05-25 | — | §8 GLOBAL_WINDOW 標 ✅ 11C-GW + 11D；main.py mode dispatch + global final viz 落地 | Patch 11C-GW + 11D |
+| 2026-05-29 | — | §8 REALTIME 標 ✅；新增「REALTIME 累積拼接」段（變動位移 / 雙層門檻 / 雙 track）| Patch 14A-18：REALTIME mode 端到端 |

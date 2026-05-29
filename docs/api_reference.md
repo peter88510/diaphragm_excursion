@@ -11,8 +11,8 @@
 | 項目 | 值 |
 |---|---|
 | Tier | SNAPSHOT |
-| 版本 | 0.7 |
-| 最後更新 | 2026-05-25 |
+| 版本 | 0.8 |
+| 最後更新 | 2026-05-29 |
 | 校對對象 | `config/*.py`、`algorithm/**/*.py`、`input/**/*.py`、`visualization/**/*.py` |
 | 狀態 | snapshot |
 | 過期條件 | 任一對應 dataclass 欄位 / 函式簽名變動 → 更新本檔 |
@@ -131,42 +131,60 @@ class Phase(Enum):
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `enabled` | `bool` | （見 source）| viz 總開關；False 時 render_frame 立刻 return |
+| `enabled` | `bool` | （見 source）| viz 總開關；False 時全 track 零 I/O |
 | `output_dir` | `Path` | `Path("output")` | 根輸出目錄 |
-| `save_final` | `bool` | `True` | final overlay track 開關 |
-| `save_debug` | `bool` | （見 source）| debug per-stage track 開關 |
+| `save_final` | `bool` | `True` | final track 開關（全 mode 經 render_frame）|
+| `save_debug` | `bool` | （見 source）| debug per-stage track 開關（全 mode）|
+| `save_realtime` | `bool` | `False` | realtime track 開關（僅 REALTIME mode 生效）|
 | `debug_stages` | `Optional[FrozenSet[str]]` | `None` | None=全部；set=過濾 |
-| `final_font_path` | `str` | `"./font/Altinn-DIN Bold.otf"` | 自訂字型 |
-| `final_show_motion_curve` | `bool` | （見 source）| motion curve 軌跡 |
-| `final_show_peak_markers` | `bool` | `True` | crest/trough markers + labels |
-| `final_show_excursion_text` | `bool` | `True` | excursion_cm / sec / velocity 文字 |
+| `final_font_path` | `str` | `"./font/Altinn-DIN Bold.otf"` | 自訂字型（final / realtime 共用）|
+| `final_show_motion_curve` | `bool` | （見 source）| final: motion curve 軌跡 |
+| `final_show_peak_markers` | `bool` | `True` | final: crest/trough markers + labels |
+| `final_show_excursion_text` | `bool` | `True` | final: excursion_cm / sec / velocity 文字 |
+| `rt_show_motion_curve` | `bool` | `True` | realtime: 軌跡（即時主視覺，預設開）|
+| `rt_show_peak_markers` | `bool` | `True` | realtime: crest/trough markers |
+| `rt_show_excursion_text` | `bool` | `True` | realtime: excursion_cm 文字 |
 
-### §1.8 `MultiframeConfig` + `MultiframeMode` + `KeyframeStrategy`
+> 三 track（final / debug / realtime）獨立可組合；final/debug 全 mode 生效，realtime 僅 REALTIME mode 呼叫 renderer。REALTIME 通常只開 save_realtime。
+
+### §1.8 `MultiframeConfig` + `MultiframeMode` + `KeyframeStrategy` + `ShiftStrategy`
 
 `config/multiframe_config.py`
 
 ```python
 class MultiframeMode(Enum):
-    LEGACY = 'legacy'              # default; per-frame loop
-    GLOBAL_WINDOW = 'global_window'  # Mode 1
-    REALTIME = 'realtime'           # Mode 2 (探索)
+    LEGACY = 'legacy'              # per-frame loop
+    GLOBAL_WINDOW = 'global_window'  # Mode 1（default）
+    REALTIME = 'realtime'           # Mode 2
 
-class KeyframeStrategy(Enum):
+class KeyframeStrategy(Enum):       # GLOBAL_WINDOW keyframe 取得
     FIXED_INDICES = 'fixed_indices'
     PHASE_CORRELATE = 'phase_correlate'
+
+class ShiftStrategy(Enum):          # REALTIME 相鄰幀位移估計
+    FIXED = 'fixed'                  # 固定 stride_pixel（legacy/fallback）
+    TEMPLATE_MATCH = 'template_match'    # 右 column matchTemplate → 整數 px
+    PHASE_CORRELATE = 'phase_correlate'  # cv2.phaseCorrelate → float sub-pixel
 ```
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `mode` | `MultiframeMode` | `LEGACY` | dispatch 三模式之一 |
+| `mode` | `MultiframeMode` | `GLOBAL_WINDOW` | dispatch 三模式之一 |
 | `legacy_frame_indices` | `Optional[List[int]]` | `None` | LEGACY 模式跑哪些 frame；None=全跑 |
 | `keyframe_strategy` | `KeyframeStrategy` | `FIXED_INDICES` | GLOBAL_WINDOW keyframe 取得策略 |
-| `keyframe_indices` | `List[int]` | （experiment）| FIXED_INDICES 用；PHASE_CORRELATE 時 ignored；嚴格 2 個（multi-frame 上限）|
-| `stride_pixel` | `int` | `8` | 每 frame 位移（pixel）|
-| `stitch_length_px_first` | `Optional[int]` | `None` | None=自動算 `min(idx[0]×stride, frame_width)`；frame_width cap 防超寬 |
-| `stitch_length_px_second` | `Optional[int]` | `None` | None=自動算 `(idx[1]-idx[0])×stride`；override 直接設 |
+| `keyframe_indices` | `List[int]` | （experiment）| FIXED_INDICES 用；嚴格 2 個（multi-frame 上限）|
+| `stride_pixel` | `int` | `8` | 每 frame 位移（GLOBAL_WINDOW 拼接 / REALTIME FIXED 策略 / 低信心 fallback）|
+| `stitch_length_px_first` | `Optional[int]` | `None` | GLOBAL_WINDOW；None=自動算 `min(idx[0]×stride, frame_width)`|
+| `stitch_length_px_second` | `Optional[int]` | `None` | GLOBAL_WINDOW；None=自動算 `(idx[1]-idx[0])×stride`|
+| `realtime_warmup_frames` | `int` | `0` | REALTIME UX gating：< 此值標 "warming up" 不疊 overlay |
+| `realtime_algorithm_min_width` | `int` | `200` | REALTIME 安全網：累積 width < 此值跳過全局 brightness_way |
+| `realtime_wavelet_refresh_every_n` | `Optional[int]` | `50` | REALTIME 每 N 幀整段 buffer 重做 wavelet 消邊界 artifact；None=不重做 |
+| `realtime_max_frames` | `Optional[int]` | `None` | REALTIME 跑到第幾幀停（測試用）；None=全 sequence |
+| `realtime_shift_strategy` | `ShiftStrategy` | `TEMPLATE_MATCH` | REALTIME 相鄰幀位移估計策略 |
+| `realtime_shift_min_confidence` | `float` | `0.3` | 位移信心門檻；< 此值視為無效幀跳過。量綱依 strategy |
 
-> 視窗 pixel 公式為 multi-frame 實驗結果；理論上不會有超過 2 keyframe 的維度擴展。
+> GLOBAL_WINDOW 視窗 pixel 公式為 multi-frame 實驗結果；理論上不超過 2 keyframe。
+> REALTIME 拼接用變動位移（estimate_shift），非固定 stride；見 §3.7 / `frame_shift.py`。
 
 ### §1.9 `DicomCropConfig`
 
@@ -317,6 +335,33 @@ class KeyframeStrategy(Enum):
 | `stitch_boundary_x` | `int` | 拼接點 x 座標（= `first_segment_len_px`）|
 | `full_width` | `int` | 全局 signal 總寬 = `first_segment_len_px + second_segment_len_px` |
 
+### §2.10 `RealtimeState`
+
+`algorithm/multiframe/realtime.py`（REALTIME mode 累積 state；含 streaming-ready `ingest_frame`）
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `algorithm_min_width` / `wavelet_refresh_every_n` / `wavelet_level_trough` / `wavelet_level_crest` | — | config snapshot（建構帶入）|
+| `stitched_init_diaphragm` / `stitched_smoothed_{trough,crest}` / `stitched_p_{trough,crest}` | `Optional[np.ndarray]` | `(W_now,)` 累積右尾拼接 signal |
+| `stitched_diaphragm_mask` | `Optional[np.ndarray]` | `(H, W_now)` 累積 mask |
+| `excursion` | `Optional[ExcursionResult]` | rolling 全局結果；width < min 時 None |
+| `measurements` | `List[PeakInfo]` | rolling 物理量 |
+| `ingested_indices` / `shifts` | `List[int]` | 每次 ingest 的 frame idx / 取的右尾 px（供 viz 對齊 color canvas）|
+| `last_frame_idx` / `n_ingested` / `last_wavelet_refresh_n` / `full_width` | `int` | metadata |
+
+`ingest_frame(frame_result, idx, shift_px, excursion_cfg, scale_y)`：append 右尾 shift_px → 視情況 refresh wavelet → rolling brightness_way。
+
+### §2.11 `ShiftResult`
+
+`algorithm/multiframe/frame_shift.py`
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `shift_px` | `int` | forward 位移（拼接用整數；正=前進、≤0=delay/倒退）= `-raw` |
+| `raw_shift` | `float` | native 估計值（與實驗 code 同號，便於對照）|
+| `confidence` | `float` | template score / phaseCorrelate confidence；FIXED=1.0 |
+| `found` | `bool` | confidence ≥ min_confidence |
+
 ---
 
 ## §3 Public Functions
@@ -372,6 +417,8 @@ class KeyframeStrategy(Enum):
 | `get_keyframe_indices` | `(cfg, seq)` | `List[int]` | GLOBAL_WINDOW 抽 keyframe；dispatch FIXED_INDICES / PHASE_CORRELATE |
 | `_phase_correlate_keyframes` | `(seq, cfg)` | `List[int]` | **stub**，raise NotImplementedError |
 | `run_global_window` | `(keyframe_motion_curves, keyframe_selections, multiframe_cfg, excursion_cfg, scale_y=None)` | `GlobalExcursionResult` | Mode 1 主入口；嚴格 2 keyframe |
+| `estimate_shift` | `(prev_gray, curr_gray, strategy, stride_pixel, min_confidence)` | `ShiftResult` | REALTIME 相鄰幀位移；dispatch FIXED / TEMPLATE_MATCH / PHASE_CORRELATE |
+| `RealtimeState.ingest_frame` | `(frame_result, idx, shift_px, excursion_cfg, scale_y=None)` | `None` | 累積右尾 + rolling 全局 excursion（streaming-ready）|
 
 ### §3.8 Signal processing
 
@@ -387,6 +434,8 @@ class KeyframeStrategy(Enum):
 | `PipelineVisualizer.render_frame` | `(frame_idx, image_gray, image_color, seg_mask, frame_result)` | `None` | disabled 時零 I/O |
 | `excursion_info_display` | `(figure, measurements: List[PeakInfo], font_path=..., peak='ct', show_text=True)` | `np.ndarray` | 多 peak markers + 自訂字；px / 字型按 image height ratio 化（ref 1500×955）|
 | `render_global_final` | `(global_result, image_color_first, image_color_second, cfg, excursion_cfg)` | `None` | GLOBAL_WINDOW final overlay；風格沿用 single-frame |
+| `render_realtime_global` | `(frame_idx, state, color_frames, is_warmup, warmup_total, cfg, excursion_cfg)` | `None` | REALTIME 完整累積 track（gate by save_realtime）|
+| `render_realtime_canvas` | `(frame_idx, image_color, state, is_warmup, warmup_total, cfg, excursion_cfg)` | `None` | REALTIME 即時視窗 track：frame[i] 底 + global 軌跡右錨定 + 累積邊界虛線 |
 
 ---
 
@@ -402,8 +451,10 @@ class KeyframeStrategy(Enum):
 | `ExcursionConfig` | `brightness_way` | `ExcursionResult` |
 | （無 cfg） | `compute_peak_info` | `PeakInfo` |
 | `MultiframeConfig` | `get_legacy_frame_indices` / `get_keyframe_indices` | `List[int]` |
-| `MultiframeConfig` + `ExcursionConfig` | `run_global_window`（待） | `GlobalExcursionResult`（待）|
-| `VisualizationConfig` + `ExcursionConfig` | `PipelineVisualizer.render_frame` | `None`（side-effect 寫 PNG） |
+| `MultiframeConfig` + `ExcursionConfig` | `run_global_window` | `GlobalExcursionResult` |
+| `MultiframeConfig`（shift_strategy）| `estimate_shift` | `ShiftResult` |
+| `ExcursionConfig` | `RealtimeState.ingest_frame` | `RealtimeState`（rolling 全局）|
+| `VisualizationConfig` + `ExcursionConfig` | `PipelineVisualizer.render_frame` / `render_realtime_*` | `None`（side-effect 寫 PNG） |
 
 ---
 
@@ -418,3 +469,4 @@ class KeyframeStrategy(Enum):
 | 2026-05-25 | 0.5 | §3.9 加 `render_global_final` | Patch 11D：GLOBAL_WINDOW final overlay |
 | 2026-05-25 | 0.6 | §1.9 新增 `DicomCropConfig`；§1.6 RunBundle 加 `dicom_crop`；§3.1 `apply_dicom_crop` 簽名改吃 cfg；header 版號補 bump 對齊變更紀錄 | Patch 13A：dicom_crop 參數抽至 config |
 | 2026-05-25 | 0.7 | §3.6 加 `aggregate_measurements`；§3.9 `excursion_info_display` 簽名改吃 `List[PeakInfo]` + 註記 ratio 化 | Patch 13C：info_display 多 peak + ratio 化 + aggregator stub |
+| 2026-05-29 | 0.8 | §1.7 加 `save_realtime` / `rt_show_*`；§1.8 加 `ShiftStrategy` + 6 個 `realtime_*` 欄位、mode default 改 GLOBAL_WINDOW；§2.10 `RealtimeState` / §2.11 `ShiftResult`；§3.7 加 `estimate_shift` / `ingest_frame`；§3.9 加 `render_realtime_*`；§4 cross-ref 更新 | Patch 14A-18：REALTIME mode 端到端（state / 變動位移 / 滑動視窗 / 雙 track viz）|
