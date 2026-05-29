@@ -54,7 +54,7 @@
 | [notes/size_normalization_pre_ratio_audit.md](notes/size_normalization_pre_ratio_audit.md) | 0.4 | 2026-05-23 | snapshot | `algorithm/` `config/` 內所有 size-sensitive 預設值；含 Step 9 ratio 化進度 |
 | [notes/patch_11b_design_backup.md](notes/patch_11b_design_backup.md) | 0.3 | 2026-05-25 | implemented | `algorithm/multiframe/global_window.py`（已落地，含 11B' 兩段 stitching）；保留作設計史 |
 | [notes/model_load_caching.md](notes/model_load_caching.md) | 0.1 | 2026-05-24 | snapshot | `algorithm/segmentation/paddleseg_segmenter.py`、`paddleseglibs/paddleseg/core/predict.py` 的 `skip_model_load` 旗標 |
-| [api_reference.md](api_reference.md) | 0.8 | 2026-05-29 | snapshot | `config/*.py`、`algorithm/**/*.py`、`input/**/*.py`、`visualization/**/*.py` 的欄位 / 簽名 |
+| [api_reference.md](api_reference.md) | 0.9 | 2026-05-29 | snapshot | `config/*.py`、`algorithm/**/*.py`、`input/**/*.py`、`visualization/**/*.py` 的欄位 / 簽名 |
 
 ---
 
@@ -91,3 +91,4 @@
 | 2026-05-25 | — | `api_reference.md` 0.5 → 0.6；§1.9 新增 `DicomCropConfig` | Patch 13A：dicom_crop 參數抽至 config |
 | 2026-05-25 | — | `api_reference.md` 0.6 → 0.7；§3.6 加 `aggregate_measurements`；§3.9 `excursion_info_display` 簽名變更 | Patch 13C：info_display 多 peak + ratio 化 + aggregator stub |
 | 2026-05-29 | — | `api_reference.md` 0.7 → 0.8；REALTIME 全套（cfg / RealtimeState / ShiftResult / estimate_shift / render_realtime_*）| Patch 14A-18：REALTIME mode 端到端 |
+| 2026-05-29 | — | `api_reference.md` 0.8 → 0.9（`curve_fit_maxfev` / `realtime_seg_refresh_max_n` / `ingest_frame` 簽名 / `timing` 參數）；`pipeline.md` 加分層 cadence 段 | Patch 19A + Patch 19 timing + Patch 20B |

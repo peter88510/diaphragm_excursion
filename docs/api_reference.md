@@ -11,7 +11,7 @@
 | 項目 | 值 |
 |---|---|
 | Tier | SNAPSHOT |
-| 版本 | 0.8 |
+| 版本 | 0.9 |
 | 最後更新 | 2026-05-29 |
 | 校對對象 | `config/*.py`、`algorithm/**/*.py`、`input/**/*.py`、`visualization/**/*.py` |
 | 狀態 | snapshot |
@@ -67,6 +67,7 @@ class Phase(Enum):
 | `area_ratio` | `float` | `10000/(955·1500)` | candidate 占圖面積 ratio 門檻 |
 | `fallback_region_top_ratio` | `float` | `200/955` | fallback region 上緣 ratio |
 | `prune_branch_max_length` | `int` | `100` | skeleton 短分支修剪 |
+| `curve_fit_maxfev` | `int` | `5000` | scipy curve_fit 迭代上限（原寫死 10M；截斷不收斂浪費，Patch 20B）|
 
 `for_phase(phase)` classmethod：依 phase 推導 sections / aspect_ratio_threshold。
 
@@ -179,12 +180,14 @@ class ShiftStrategy(Enum):          # REALTIME 相鄰幀位移估計
 | `realtime_warmup_frames` | `int` | `0` | REALTIME UX gating：< 此值標 "warming up" 不疊 overlay |
 | `realtime_algorithm_min_width` | `int` | `200` | REALTIME 安全網：累積 width < 此值跳過全局 brightness_way |
 | `realtime_wavelet_refresh_every_n` | `Optional[int]` | `50` | REALTIME 每 N 幀整段 buffer 重做 wavelet 消邊界 artifact；None=不重做 |
+| `realtime_seg_refresh_max_n` | `int` | `60` | REALTIME 分層 cadence：距上次 heavy(paddle) 幀達此數強制再跑（峰觸發為主，此為保底上限，Patch 19A）|
 | `realtime_max_frames` | `Optional[int]` | `None` | REALTIME 跑到第幾幀停（測試用）；None=全 sequence |
 | `realtime_shift_strategy` | `ShiftStrategy` | `TEMPLATE_MATCH` | REALTIME 相鄰幀位移估計策略 |
 | `realtime_shift_min_confidence` | `float` | `0.3` | 位移信心門檻；< 此值視為無效幀跳過。量綱依 strategy |
 
 > GLOBAL_WINDOW 視窗 pixel 公式為 multi-frame 實驗結果；理論上不超過 2 keyframe。
 > REALTIME 拼接用變動位移（estimate_shift），非固定 stride；見 §3.7 / `frame_shift.py`。
+> REALTIME 分層 cadence（Patch 19A）：heavy 幀（paddle 全 pipeline，更新 y_band + 提供整張 frame mask）僅在 bootstrap / 峰觸發 / 距上次 ≥ `realtime_seg_refresh_max_n`；其餘為 light（沿用 cached y_band 只跑 motion_curve）。mask 採 refresh-recent。
 
 ### §1.9 `DicomCropConfig`
 
@@ -349,7 +352,7 @@ class ShiftStrategy(Enum):          # REALTIME 相鄰幀位移估計
 | `ingested_indices` / `shifts` | `List[int]` | 每次 ingest 的 frame idx / 取的右尾 px（供 viz 對齊 color canvas）|
 | `last_frame_idx` / `n_ingested` / `last_wavelet_refresh_n` / `full_width` | `int` | metadata |
 
-`ingest_frame(frame_result, idx, shift_px, excursion_cfg, scale_y)`：append 右尾 shift_px → 視情況 refresh wavelet → rolling brightness_way。
+`ingest_frame(motion_curve, idx, shift_px, excursion_cfg, scale_y=None, full_mask=None)`：append 右尾 shift_px（curve append-only；mask light=carry-forward / heavy=refresh-recent）→ 視情況 refresh wavelet → rolling brightness_way。Patch 19A decouple 成吃 `motion_curve` + 可選 `full_mask`（heavy 幀 paddle mask）。
 
 ### §2.11 `ShiftResult`
 
@@ -385,14 +388,14 @@ class ShiftStrategy(Enum):          # REALTIME 相鄰幀位移估計
 
 | Function | Signature | Returns | 用途 |
 |---|---|---|---|
-| `detect` | `(image, config, use_segment=None)` | `DetectionResult` | 主入口；`use_segment` 提供時走 paddle 路徑 |
+| `detect` | `(image, config, use_segment=None, timing=None)` | `DetectionResult` | 主入口；`use_segment` 提供時走 paddle 路徑；`timing` 為 REALTIME Layer D 計時（duck-typed，optional）|
 
 ### §3.4 ROI band
 
 | Function | Signature | Returns | 用途 |
 |---|---|---|---|
 | `compute_target_y_range` | `(target_y_range, image_height, reserve_ratio)` | `Tuple[int, int]` | best_region 上下擴張 ratio |
-| `enhanced_search` | `(image_gray, y_band, detection_config, roi_band_config)` | `RoiSearchResult` | enhance + medianBlur + pass2 detect |
+| `enhanced_search` | `(image_gray, y_band, detection_config, roi_band_config, timing=None)` | `RoiSearchResult` | enhance + medianBlur + pass2 detect；`timing` 同上（轉發給 pass2 detect）|
 | `select_target` | `(detection_pass1, refined, y_band, image_shape, use_segment_label)` | `TargetSelection` | 依 cfg 選 mask 來源 |
 
 ### §3.5 Motion curve
@@ -418,7 +421,7 @@ class ShiftStrategy(Enum):          # REALTIME 相鄰幀位移估計
 | `_phase_correlate_keyframes` | `(seq, cfg)` | `List[int]` | **stub**，raise NotImplementedError |
 | `run_global_window` | `(keyframe_motion_curves, keyframe_selections, multiframe_cfg, excursion_cfg, scale_y=None)` | `GlobalExcursionResult` | Mode 1 主入口；嚴格 2 keyframe |
 | `estimate_shift` | `(prev_gray, curr_gray, strategy, stride_pixel, min_confidence)` | `ShiftResult` | REALTIME 相鄰幀位移；dispatch FIXED / TEMPLATE_MATCH / PHASE_CORRELATE |
-| `RealtimeState.ingest_frame` | `(frame_result, idx, shift_px, excursion_cfg, scale_y=None)` | `None` | 累積右尾 + rolling 全局 excursion（streaming-ready）|
+| `RealtimeState.ingest_frame` | `(motion_curve, idx, shift_px, excursion_cfg, scale_y=None, full_mask=None)` | `None` | 累積右尾 + rolling 全局 excursion；`full_mask`=heavy 幀 paddle mask（refresh-recent）/ None=light（streaming-ready）|
 
 ### §3.8 Signal processing
 
@@ -470,3 +473,4 @@ class ShiftStrategy(Enum):          # REALTIME 相鄰幀位移估計
 | 2026-05-25 | 0.6 | §1.9 新增 `DicomCropConfig`；§1.6 RunBundle 加 `dicom_crop`；§3.1 `apply_dicom_crop` 簽名改吃 cfg；header 版號補 bump 對齊變更紀錄 | Patch 13A：dicom_crop 參數抽至 config |
 | 2026-05-25 | 0.7 | §3.6 加 `aggregate_measurements`；§3.9 `excursion_info_display` 簽名改吃 `List[PeakInfo]` + 註記 ratio 化 | Patch 13C：info_display 多 peak + ratio 化 + aggregator stub |
 | 2026-05-29 | 0.8 | §1.7 加 `save_realtime` / `rt_show_*`；§1.8 加 `ShiftStrategy` + 6 個 `realtime_*` 欄位、mode default 改 GLOBAL_WINDOW；§2.10 `RealtimeState` / §2.11 `ShiftResult`；§3.7 加 `estimate_shift` / `ingest_frame`；§3.9 加 `render_realtime_*`；§4 cross-ref 更新 | Patch 14A-18：REALTIME mode 端到端（state / 變動位移 / 滑動視窗 / 雙 track viz）|
+| 2026-05-29 | 0.9 | §1.2 加 `curve_fit_maxfev`；§1.8 加 `realtime_seg_refresh_max_n` + 分層 cadence 註；§2.10 / §3.7 `ingest_frame` 簽名改 `(motion_curve, ..., full_mask)`；§3.3 `detect` / §3.4 `enhanced_search` 加 optional `timing` | Patch 19A（分層 cadence + refresh-recent）+ Patch 19 Layer C/D timing + Patch 20B（`curve_fit_maxfev`）|

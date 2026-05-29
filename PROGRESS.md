@@ -196,6 +196,7 @@
   - ShiftStrategy：TEMPLATE_MATCH（整數，default）/ PHASE_CORRELATE（float）/ FIXED；`shift≤0` 或低信心跳過 ingest
   - 雙 track viz：canvas（frame[i] 底 + global 軌跡右錨定 + 累積邊界虛線）/ global（完整累積）
   - `RealtimeState.ingest_frame` 為 streaming-ready 接口（未來接真實 stream 只換來源）
+  - **分層 cadence（Patch 19A，省 paddle）**：estimate_shift 前移→無效幀跳過不跑 paddle；heavy（paddle 全 pipeline）僅 bootstrap / 峰觸發（piggyback brightness_way crest/trough x）/ 距上次 ≥ `realtime_seg_refresh_max_n`；其餘 light（沿用 cached y_band 只跑 motion_curve）。mask 採 refresh-recent（heavy 整張 frame mask 右對齊覆蓋 buffer 最右 ~frame_width 欄）；`ingest_frame` decouple 成吃 `(motion_curve, ..., full_mask)`
 - **待續（未來）**：phase_correlate 實作精修；多 peak aggregator 聚合規則；真實 stream adapter
 
 ### Step 11 — Cfg 精煉與 ratio 化擴展（**進行中**）
@@ -215,6 +216,10 @@
 | 17 | canvas 改右錨定滑動視窗（base=frame[i] + global 軌跡最右段）| ✅ |
 | 18 | `rt_show_*` 開關 + 累積邊界洋紅虛線 + viz config 文件化 | ✅ |
 | — | 刪 `utils.py`（4 函式已被分層模組取代）+ 兩支實驗檔移除 | ✅ |
+| 19A | REALTIME 分層 cadence（estimate_shift 前移 + heavy/light + refresh-recent mask）| ✅ |
+| 19 timing | REALTIME per-stage 計時 instrumentation（Layer A 每幀 / B heavy / C detect_roi / D detect 內部）| ✅ |
+| 20A+20B | detect 優化：curve_fit ROI-crop（byte-identical）+ `curve_fit_maxfev` 10M→5000 | ✅ |
+| docs | SNAPSHOT 同步：api_reference 0.8→0.9 / pipeline 分層 cadence / INDEX | ✅ |
 
 **Patch 13B（取消）**：原計畫把 paddle model 路徑搬出 `paddleseglibs/predict.py`；發現 `PaddleSegSegmenterConfig` 已將 `config_path / model_path / save_dir` 暴露為欄位，user 可直接 override，預設值放哪不影響使用體驗。
 
@@ -264,11 +269,16 @@
 - Step 10 — Patch 18：`rt_show_*` 開關 + 累積邊界洋紅虛線 + viz config 文件化
 - 清理 — 刪 `utils.py`（4 函式已被分層取代）+ `px_lv_shiftX.py` / `estimate_xshift.py` 實驗檔
 - Step 10 — Patch 14D：SNAPSHOT docs 同步（api_reference 0.8 / pipeline / algorithm.md / INDEX）
+- Step 10 — Patch 19A：REALTIME 分層 cadence（estimate_shift 前移 + heavy/light tier + refresh-recent mask；省 paddle，`ingest_frame` decouple 成 `(motion_curve, full_mask)`）
+- Step 10 — Patch 19 timing：REALTIME per-stage 計時 instrumentation（Layer A 每幀 / B heavy 內部 / C detect_roi 分趟 / D detect 內部 op；duck-typed timing，None 零影響）
+- 效能 — Patch 20A+20B：detect 優化（20A curve_fit per-candidate ops ROI-crop 到 y-band，byte-identical 已實證；20B `curve_fit_maxfev` 進 config，10M→5000）
+- 文件 — SNAPSHOT 同步：api_reference 0.8→0.9 + pipeline 分層 cadence 段 + INDEX（Patch 19A + timing + 20B）
 
 ---
 
 ## 📝 待辦 / 後續 patch（先記下，不影響當前順序）
 
+- [ ] **Patch 20B regression**：LEGACY mode 跑數張 frame，比對 `curve_fit_maxfev`=5000 vs 原 10M 的 `detection.best_region` / 選中 idx。20A 為 byte-identical（已實證）；20B 若某 frame 變動代表該擬合本需 >5000 evals，調高 `curve_fit_maxfev` 即可。順便重看 Layer D `curve_fit` ms 降幅
 - [ ] **Patch 8 驗證**（下次 session 第一件事）：跑 `python main.py`，看 log 新增的 `excursion_cm=X.XX` 數值是否合理（橫膈膜 excursion 通常 1–7 cm）
 - [ ] PNG path 的實際使用情境確認（目前可能是預留）
 - [x] Multi-frame DICOM 支援 — Step 3 已處理（FrameSequence 首維永遠是 N）
@@ -309,6 +319,9 @@
 - **Step 10（Multi-frame）**：✅ 三 mode 全落地
   - LEGACY / GLOBAL_WINDOW（11A-11D）✅
   - REALTIME（14A-18）✅ 端到端 + 實機驗證（變動位移 / 滑動視窗 / 雙 track / 累積邊界虛線）
+  - REALTIME 分層 cadence（**Patch 19A**）✅：estimate_shift 前移 + heavy/light + refresh-recent mask（省 paddle）
+- **REALTIME profiling（Patch 19 timing）**：✅ per-stage 計時 instrumentation（Layer A/B/C/D；duck-typed，None 零影響）
+- **效能優化（Patch 20A+20B）**：✅ 落地，**20B 待 regression**——20A curve_fit ROI-crop（byte-identical 已實證）；20B `curve_fit_maxfev` 10M→5000（行為變更，需 LEGACY 比對 best_region）
 - **Step 11（cfg 精煉）**：12A / 13A / 13C / 15 ✅；13B 取消
 - **config 入口**：`run_config.py`（gitignored）統一個人實驗值，`run()` 注入 bundle（Patch 15）
 - **清理**：`utils.py` + 兩支實驗檔已刪
