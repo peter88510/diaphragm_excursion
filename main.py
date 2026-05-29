@@ -15,6 +15,9 @@ Multi-frame dispatch（依 MultiframeConfig.mode）：
     LEGACY        : per-frame loop（傳統行為）
     GLOBAL_WINDOW : 抽 2 keyframe → 各跑 single-frame → run_global_window 拼接 → global final viz
 """
+import time
+from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Optional
 
 import cv2
@@ -45,6 +48,46 @@ from visualization.pipeline_visualizer import PipelineVisualizer
 from visualization.realtime import render_realtime_canvas, render_realtime_global
 
 
+@dataclass
+class RealtimeTiming:
+    """REALTIME per-stage 計時累計（profiling；不參與演算法計算）。"""
+    totals: dict = field(default_factory=lambda: defaultdict(float))
+    counts: dict = field(default_factory=lambda: defaultdict(int))
+
+    def record(self, stage: str, dt: float) -> None:
+        self.totals[stage] += dt
+        self.counts[stage] += 1
+
+    def report(self, loop_total: float) -> None:
+        """印 Layer A（每幀時間去向，% loop）+ Layer B（heavy 內部，% heavy）。"""
+        layer_a = ["shift", "heavy", "light", "ingest", "viz"]
+        layer_b = ["seg_predict", "detect_roi", "motion_curve",
+                   "excursion_sf", "pv_render"]
+        heavy_total = self.totals.get("heavy", 0.0)
+
+        def _line(stage: str, denom: float) -> Optional[str]:
+            n = self.counts.get(stage, 0)
+            if n == 0:
+                return None
+            tot = self.totals.get(stage, 0.0)
+            avg_ms = tot / n * 1000
+            pct = tot / denom * 100 if denom else 0.0
+            return (f"    {stage:<13}{tot:8.2f}s {n:5d}x "
+                    f"{avg_ms:8.1f} ms {pct:5.1f}%")
+
+        print(f"[realtime-timing] loop_total={loop_total:.2f}s")
+        print("  Layer A: per-frame time (% loop)")
+        for s in layer_a:
+            line = _line(s, loop_total)
+            if line:
+                print(line)
+        print("  Layer B: heavy internal breakdown (% heavy)")
+        for s in layer_b:
+            line = _line(s, heavy_total)
+            if line:
+                print(line)
+
+
 def _run_single_frame(
     seq,
     i: int,
@@ -55,15 +98,23 @@ def _run_single_frame(
     bundle: RunBundle,
     is_excursion: bool,
     scale_y,
+    timing: Optional[RealtimeTiming] = None,
 ) -> FrameResult:
-    """單 frame pipeline；LEGACY 與 GLOBAL_WINDOW 兩 mode 共用。"""
+    """單 frame pipeline；LEGACY 與 GLOBAL_WINDOW 兩 mode 共用。
+
+    timing 非 None（REALTIME heavy 幀）時記錄 Layer B 各子步驟耗時；None 時零影響。
+    """
     frame = seq.frames[i]
 
+    t0 = time.perf_counter()
     mask_pil = segmenter.predict(
         image_path=seq.source_path,
         dcm_array=frame,
     )
     seg_mask = np.array(mask_pil.convert("L"), dtype=np.uint8)
+    if timing is not None:
+        timing.record("seg_predict", time.perf_counter() - t0)
+        t0 = time.perf_counter()
 
     detection = detect(gray, bundle.detection, use_segment=seg_mask)
 
@@ -87,12 +138,18 @@ def _run_single_frame(
         image_shape=gray.shape[:2],
         use_segment_label=bundle.roi_band.use_segment_label,
     )
+    if timing is not None:
+        timing.record("detect_roi", time.perf_counter() - t0)
+        t0 = time.perf_counter()
 
     motion_curve = extract_motion_curve(
         image=cv2.medianBlur(gray, 7),
         y_range=y_band,
         config=bundle.motion_curve,
     )
+    if timing is not None:
+        timing.record("motion_curve", time.perf_counter() - t0)
+        t0 = time.perf_counter()
 
     excursion = None
     measurements = []
@@ -112,6 +169,9 @@ def _run_single_frame(
             )
             for batch in excursion.batches
         ]
+    if timing is not None:
+        timing.record("excursion_sf", time.perf_counter() - t0)
+        t0 = time.perf_counter()
 
     result = FrameResult(
         detection=detection,
@@ -129,6 +189,8 @@ def _run_single_frame(
         seg_mask=seg_mask,
         frame_result=result,
     )
+    if timing is not None:
+        timing.record("pv_render", time.perf_counter() - t0)
     return result
 
 
@@ -321,6 +383,7 @@ def _run_realtime(
         wavelet_level_trough=bundle.motion_curve.wavelet_level_trough,
         wavelet_level_crest=bundle.motion_curve.wavelet_level_crest,
     )
+    timing = RealtimeTiming()
 
     print("[realtime] frame 0 skipped (probe init)")
     results = []
@@ -329,19 +392,24 @@ def _run_realtime(
     frames_since_heavy = 0
     last_peak_x = -1
     pending_peak_heavy = False
+    n_skip = 0
 
+    loop_start = time.perf_counter()
     for i in range(1, stop):
         gray = gray_frames[i]
 
         # 1. estimate_shift 前移（cheap）→ 無效幀跳過，省 paddle
+        t = time.perf_counter()
         shift = estimate_shift(
             prev_gray, gray, mf.realtime_shift_strategy,
             stride_pixel=mf.stride_pixel,
             min_confidence=mf.realtime_shift_min_confidence,
         )
+        timing.record("shift", time.perf_counter() - t)
         prev_gray = gray
 
         if not (is_excursion and shift.found and shift.shift_px > 0):
+            n_skip += 1
             print(f"[realtime {i}/{stop - 1}] "
                   f"shift={shift.shift_px} (raw={shift.raw_shift:.2f}, "
                   f"conf={shift.confidence:.3f}, found={shift.found}), "
@@ -360,25 +428,31 @@ def _run_realtime(
 
         # 3. 跑該 tier 取 motion_curve（heavy 才有 full_mask + 刷新 y_band）
         if need_heavy:
+            t = time.perf_counter()
             result = _run_single_frame(
                 seq, i, gray, color_frames[i],
-                segmenter, pv, bundle, is_excursion, scale_y,
+                segmenter, pv, bundle, is_excursion, scale_y, timing=timing,
             )
+            timing.record("heavy", time.perf_counter() - t)
             results.append(result)
             cached_y_band = result.y_band
             motion_curve = result.motion_curve
             full_mask = result.selection.diaphragm_mask
             frames_since_heavy = 0
         else:
+            t = time.perf_counter()
             motion_curve = _run_light_frame(gray, cached_y_band, bundle)
+            timing.record("light", time.perf_counter() - t)
             full_mask = None
             frames_since_heavy += 1
 
         # 4. ingest（refresh-recent mask）+ rolling excursion
+        t = time.perf_counter()
         state.ingest_frame(
             motion_curve, i, shift.shift_px,
             bundle.excursion, scale_y, full_mask=full_mask,
         )
+        timing.record("ingest", time.perf_counter() - t)
 
         # 5. piggyback：偵測到更右側新峰 → 下一幀 heavy（補峰精度）
         max_peak_x = _max_peak_x(state.excursion)
@@ -387,6 +461,7 @@ def _run_realtime(
             last_peak_x = max_peak_x
 
         # 6. 雙 track viz（global 完整 / canvas 右錨定視窗）
+        t = time.perf_counter()
         render_realtime_global(
             frame_idx=i, state=state, color_frames=color_frames,
             is_warmup=is_warmup, warmup_total=warmup,
@@ -397,6 +472,7 @@ def _run_realtime(
             is_warmup=is_warmup, warmup_total=warmup,
             cfg=bundle.viz, excursion_cfg=bundle.excursion,
         )
+        timing.record("viz", time.perf_counter() - t)
 
         tier = "heavy" if need_heavy else "light"
         status = "warmup" if is_warmup else (
@@ -406,6 +482,10 @@ def _run_realtime(
               f"shift={shift.shift_px}, {tier}, "
               f"width={state.full_width}, {status}, global_cm={gcm}")
 
+    loop_total = time.perf_counter() - loop_start
+    print(f"[realtime] frames: heavy={timing.counts['heavy']} "
+          f"light={timing.counts['light']} skip={n_skip}")
+    timing.report(loop_total)
     return results
 
 
