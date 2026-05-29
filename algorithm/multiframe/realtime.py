@@ -2,12 +2,11 @@
 
 模擬醫生使用流程：探頭貼上 → 開始錄製 → 每幀新進 stride_pixel 訊號累積。
 
-拼接策略（純右尾累積）：
+拼接策略（純右尾累積 + 變動位移）：
   - frame[0] 為探頭啟動畫面，caller 跳過不 ingest
-  - frame[1..N] 每幀只取右尾 stride_pixel（「新進」訊號）append 到 buffer
-  - 累積 width = N × stride_pixel（N = 已 ingest 幀數）
-  - frame[0] 與 frame[1] 為相鄰幀：frame[0] 左移 stride_pixel 移出左側、右側新進
-    stride_pixel = frame[1]，故只取右尾即得「真正新進」段
+  - frame[i] 每幀取右尾 shift_px（caller 用 estimate_shift 算出的「新進」訊號量）
+  - 累積 width = Σ shift_px（非固定；delay 幀 shift≈0 由 caller 跳過不 ingest）
+  - shift_px 取代舊版固定 stride_pixel：實際超音波非理想 +8px，有 delay / 快進
 
 Wavelet 邊界處理：
   - 純右尾 concat 會在每段邊界累積各 frame wavelet 的 edge artifact
@@ -40,7 +39,6 @@ from config.excursion_config import ExcursionConfig
 @dataclass
 class RealtimeState:
     # --- config snapshot（建構時帶入）---
-    stride_pixel: int
     algorithm_min_width: int
     wavelet_refresh_every_n: Optional[int]
     wavelet_level_trough: int
@@ -58,6 +56,10 @@ class RealtimeState:
     excursion: Optional[ExcursionResult] = None
     measurements: List[PeakInfo] = field(default_factory=list)
 
+    # --- 拼接紀錄（供 viz 對齊 color canvas；parallel lists）---
+    ingested_indices: List[int] = field(default_factory=list)  # 每次 ingest 的 frame idx
+    shifts: List[int] = field(default_factory=list)            # 對應每次取的右尾 px
+
     # --- metadata ---
     last_frame_idx: int = -1
     n_ingested: int = 0
@@ -68,14 +70,18 @@ class RealtimeState:
         self,
         frame_result: FrameResult,
         idx: int,
+        shift_px: int,
         excursion_cfg: ExcursionConfig,
         scale_y: Optional[float] = None,
     ) -> None:
-        """納入一個新 frame：append 右尾 → 視情況 refresh wavelet → rolling excursion。
+        """納入一個新 frame：append 右尾 shift_px → 視情況 refresh wavelet → rolling excursion。
 
+        shift_px 由 caller 用 estimate_shift 算出（變動位移；取代固定 stride）。
         streaming-ready 外部接口；未來換真實 stream 來源只需照樣呼叫。
         """
-        self._append_tail(frame_result)
+        self._append_tail(frame_result, shift_px)
+        self.ingested_indices.append(idx)
+        self.shifts.append(shift_px)
         self.last_frame_idx = idx
         self.n_ingested += 1
         self.full_width = int(self.stitched_init_diaphragm.shape[0])
@@ -87,11 +93,11 @@ class RealtimeState:
 
     # ---------- internal ----------
 
-    def _append_tail(self, frame_result: FrameResult) -> None:
-        """取 frame 的 motion_curve / mask 右尾 stride_pixel，初始化或 concat 到 buffer。"""
+    def _append_tail(self, frame_result: FrameResult, shift_px: int) -> None:
+        """取 frame 的 motion_curve / mask 右尾 shift_px，初始化或 concat 到 buffer。"""
         mc = frame_result.motion_curve
         mask = frame_result.selection.diaphragm_mask
-        s = self.stride_pixel
+        s = shift_px
 
         init_t = mc.init_diaphragm[-s:]
         st_t = mc.smoothed_trough[-s:]

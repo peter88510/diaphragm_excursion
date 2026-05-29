@@ -9,6 +9,10 @@ from algorithm.multiframe.frame_selection import (
     get_keyframe_indices,
     get_legacy_frame_indices,
 )
+from algorithm.multiframe.frame_shift import (
+    ShiftResult,
+    estimate_shift,
+)
 from algorithm.multiframe.global_window import (
     GlobalExcursionResult,
     run_global_window,
@@ -18,6 +22,8 @@ from algorithm.multiframe.realtime import RealtimeState
 __all__ = [
     "get_legacy_frame_indices",
     "get_keyframe_indices",
+    "estimate_shift",
+    "ShiftResult",
     "run_global_window",
     "GlobalExcursionResult",
     "RealtimeState",

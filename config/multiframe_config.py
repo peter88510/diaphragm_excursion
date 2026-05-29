@@ -35,6 +35,13 @@ class KeyframeStrategy(Enum):
     PHASE_CORRELATE = 'phase_correlate'
 
 
+class ShiftStrategy(Enum):
+    """REALTIME 相鄰幀位移估計策略（演算法見 algorithm/multiframe/frame_shift.py）。"""
+    FIXED = 'fixed'                      # 固定 stride_pixel（legacy / fallback）
+    TEMPLATE_MATCH = 'template_match'    # 右 column matchTemplate → 整數 px
+    PHASE_CORRELATE = 'phase_correlate'  # cv2.phaseCorrelate → float sub-pixel
+
+
 @dataclass
 class MultiframeConfig:
     mode: MultiframeMode = MultiframeMode.GLOBAL_WINDOW
@@ -69,6 +76,13 @@ class MultiframeConfig:
 
     # Algorithm 安全網：累積 signal width < 此值跳過全局 brightness_way（避免 garbage）
     realtime_algorithm_min_width: int = 200
+
+    # 相鄰幀位移估計策略（取代固定 stride_pixel）
+    realtime_shift_strategy: ShiftStrategy = ShiftStrategy.TEMPLATE_MATCH
+
+    # 位移信心門檻；< 此值視為無效幀跳過 ingest。
+    # 量綱依 strategy：TEMPLATE_MATCH 用 TM_CCOEFF_NORMED [-1,1]；PHASE_CORRELATE [0,1]
+    realtime_shift_min_confidence: float = 0.3
 
     # 每 k frame 對整段 buffer 重做 wavelet smoothing（消純右尾 concat 的邊界 artifact）
     # None = 不重做（純 append）
