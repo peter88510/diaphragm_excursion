@@ -90,7 +90,6 @@ def brightness_way(
             start_range=config.excursion_rule_start_range,
             end_range=config.excursion_rule_end_range,
         )
-        print(selected_troughs, selected_crest)
         rule_results.append((selected_troughs, selected_crest))
 
     # 每批做 boundary refine

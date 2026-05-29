@@ -63,7 +63,6 @@ def algo_segmentation(
     level_image = level_function(gamma_image)
 
     counter_dict = Counter(level_image.flatten())
-    print(" ", counter_dict)
 
     count = 0
     cumulate = {}
@@ -72,19 +71,16 @@ def algo_segmentation(
         c = counter_dict.get(i, 0)
         count += c
         cumulate[i] = count
-        print(" ", i, f"({CHOICES_VALUE[i] - 1})", "count: ", count)
         if count >= detect_area:
             thresh = CHOICES_VALUE[i] - 1
-            print(f" thresh: ({thresh})")
             break
 
     condition = [level_image == value for value in CHOICES_LV]
     value_image = np.select(condition, CHOICES_VALUE, 0).astype(np.uint8)
 
     if use_otsu:
-        otsu_thresh, binary = cv2.threshold(
+        _, binary = cv2.threshold(
             image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        print(f"OTSU: {otsu_thresh}")
     else:
         # 注意：thresh 為「不包含」上界，所以 value-1 表示「該階以上」
         _, binary = cv2.threshold(value_image, thresh, 255, cv2.THRESH_BINARY)

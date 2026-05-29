@@ -113,10 +113,9 @@ def curve_fit_by_part(points_data: np.ndarray, fit_func, maxfev: int = _CURVE_FI
         params, _ = curve_fit(fit_func, x_values, y_values, p0=init_guess, maxfev=maxfev)
         y_fit = fit_func(x_values, *params)
         mse = np.mean((y_values - y_fit) ** 2)
-    except Exception as e:
+    except Exception:
         mse = 1000
         y_fit = y_values - 10000
-        print(e)
 
     return mse, x_values, y_values, y_fit
 
@@ -228,5 +227,4 @@ def diaphragm_curve_fit(
 
     mse_idx.append(best_idx)
     regions.append(best_region)
-    print("[Diaphragm Curve Fit] mse_idx: ", mse_idx)
     return mse_idx, regions

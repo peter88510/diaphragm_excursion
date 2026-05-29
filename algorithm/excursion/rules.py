@@ -86,13 +86,11 @@ def excursion_rule(
         center = (start + end) / 2
         if rise_or_decline[0] == -2:
             # -2 → 2 吐氣再吸氣 → crossings 裡找波谷，外找波峰
-            print("[INFO] -2  2 吐氣再吸氣 crossing裡面找波谷，外找波峰")
             valley_in_range = [v for v in in_range if start <= v <= end]
             peak_in_range = [p for p in in_range if p <= start or p >= end]
             peak_in_range = [p for p in in_range if end <= p <= end + (end - start)]  # 測試中
         else:
             # 2 → -2 吸氣再吐氣 → crossings 裡找波峰，外找波谷
-            print("[INFO] 2 -2 吸氣再吐氣 crossing裡面找波峰，外找波谷")
             valley_in_range = [v for v in in_range if end <= v <= end + (end - start)]  # 測試中
             peak_in_range = [p for p in in_range if start <= p <= end]
 

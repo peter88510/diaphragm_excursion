@@ -24,7 +24,6 @@ def find_midline(
         rise_or_decline: 對應的方向（2=上升, -2=下降）
     """
     midline = int(np.mean(diaphragm_y_value))
-    print("[INFO] midline value: ", midline)
 
     crossings_ = np.where(
         np.diff(np.where(diaphragm_y_value - midline >= 0, 1, -1)))[0]
@@ -37,6 +36,5 @@ def find_midline(
 
     crossings = crossings_[valid_mask]
     rise_or_decline = rise_or_decline_[valid_mask]
-    print("[INFO] num of crossings: ", len(crossings))
 
     return crossings, rise_or_decline
