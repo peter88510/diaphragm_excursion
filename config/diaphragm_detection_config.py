@@ -48,6 +48,9 @@ class DiaphragmDetectionConfig:
 
     # --- curve_fit ---
     prune_branch_max_length: int = 100         # 原 while length < 100
+    # scipy curve_fit maxfev 上限。原寫死 10_000_000（不收斂的擬合會燒到天花板）；
+    # 5000 ≈ scipy LM 預設(~1400) 的 3.5×，正常收斂不受影響、截斷不收斂的浪費
+    curve_fit_maxfev: int = 5000
 
     @classmethod
     def for_phase(cls, phase: Phase) -> "DiaphragmDetectionConfig":

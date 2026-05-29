@@ -108,6 +108,7 @@ def detect(
             b_image=binary,
             sections=config.sections,
             prune_branch_max_length=config.prune_branch_max_length,
+            maxfev=config.curve_fit_maxfev,
         )
     if timing is not None:
         timing.record("curve_fit", time.perf_counter() - t)

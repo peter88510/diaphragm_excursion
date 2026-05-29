@@ -31,6 +31,12 @@ from skimage.morphology import skeletonize
 from algorithm.signal_processing import wavelet_denoising
 
 
+# scipy curve_fit maxfev fallback（直接呼叫時用；detector 走 config.curve_fit_maxfev）
+_CURVE_FIT_MAXFEV = 5000
+# ROI-crop pad：保 skeletonize 在 crop 邊界與全圖一致的鄰域（≥1 即足，4 為安全 margin）
+_ROI_CROP_PAD_Y = 4
+
+
 # ---------- 評分 ----------
 
 def morphological_comparison(y_original: np.ndarray, y_fit: np.ndarray):
@@ -92,7 +98,7 @@ def poly_sin(x, a, b, c, A, f, phi):
 
 # ---------- Single-section fit ----------
 
-def curve_fit_by_part(points_data: np.ndarray, fit_func):
+def curve_fit_by_part(points_data: np.ndarray, fit_func, maxfev: int = _CURVE_FIT_MAXFEV):
     """對單一段點集做 wavelet 降噪後的曲線擬合。
 
     points_data: shape (N, 2)，points[:, 0] 是 y、points[:, 1] 是 x
@@ -104,7 +110,7 @@ def curve_fit_by_part(points_data: np.ndarray, fit_func):
                   2 * np.pi / len(x_values), 0]
 
     try:
-        params, _ = curve_fit(fit_func, x_values, y_values, p0=init_guess, maxfev=10000000)
+        params, _ = curve_fit(fit_func, x_values, y_values, p0=init_guess, maxfev=maxfev)
         y_fit = fit_func(x_values, *params)
         mse = np.mean((y_values - y_fit) ** 2)
     except Exception as e:
@@ -123,6 +129,7 @@ def diaphragm_curve_fit(
     b_image: np.ndarray,
     sections: int = 1,
     prune_branch_max_length: int = 100,
+    maxfev: int = _CURVE_FIT_MAXFEV,
 ):
     """對每個 candidate 做骨架抽取 + 曲線擬合 + 評分，回傳最佳者。
 
@@ -132,6 +139,7 @@ def diaphragm_curve_fit(
         b_image: binary mask（shape 提供用）
         sections: 把骨架點切成幾段分別擬合
         prune_branch_max_length: 修剪短分支的長度上限
+        maxfev: scipy curve_fit 迭代上限
 
     Returns:
         (mse_idx, regions)：list 各一個元素，分別是 best label index 與其 (top, bottom)
@@ -143,10 +151,15 @@ def diaphragm_curve_fit(
     best_region = None
     best_idx = -2
 
+    h_full = b_image.shape[0]
     for idx, top, bottom in potential_diaphragm_regions:
-        skeleton_map = np.zeros(b_image.shape).astype("uint8")
-        step1_filtered_binary = np.zeros(b_image.shape).astype("uint8")
-        step1_filtered_binary[labels == idx] = 255
+        # ROI-crop：只在候選 y-band（+pad）× 全寬做骨架/擬合，省全圖運算。
+        # 輸出只用 best_idx 與 (top,bottom)；曲線評分只看正規化形狀（normalize_to_01
+        # 對 y offset 不變、x 全寬未裁、點數不變）→ 與全圖逐點等價
+        y0 = max(0, top - _ROI_CROP_PAD_Y)
+        y1 = min(h_full, bottom + _ROI_CROP_PAD_Y)
+        step1_filtered_binary = np.zeros((y1 - y0, b_image.shape[1]), dtype="uint8")
+        step1_filtered_binary[labels[y0:y1, :] == idx] = 255
 
         # 填補孔洞
         contours, hierarchy = cv2.findContours(
@@ -186,9 +199,10 @@ def diaphragm_curve_fit(
                     current = next_points[0]
                     length += 1
 
+        skeleton_map = np.zeros_like(step1_filtered_binary)
         skeleton_map[pruned_skeleton] = 255
 
-        # 取點並沿 x 排序
+        # 取點並沿 x 排序（points[:,0] 為 cropped y，只進 normalize → 不影響輸出）
         points = np.column_stack(np.where(skeleton_map > 0))
         points = points[points[:, 1].argsort()]
 
@@ -201,7 +215,7 @@ def diaphragm_curve_fit(
         split_data = np.array_split(points, indices_or_sections=sections)
         for point in split_data:
             mse, x_values, y_values, y_fit = curve_fit_by_part(
-                points_data=point, fit_func=poly_sin)
+                points_data=point, fit_func=poly_sin, maxfev=maxfev)
             total_mse += mse
             y_fit_ttl = y_fit if y_fit_ttl is None else np.hstack((y_fit_ttl, y_fit))
 
