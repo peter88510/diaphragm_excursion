@@ -273,6 +273,7 @@
 - Step 10 — Patch 19 timing：REALTIME per-stage 計時 instrumentation（Layer A 每幀 / B heavy 內部 / C detect_roi 分趟 / D detect 內部 op；duck-typed timing，None 零影響）
 - 效能 — Patch 20A+20B：detect 優化（20A curve_fit per-candidate ops ROI-crop 到 y-band，byte-identical 已實證；20B `curve_fit_maxfev` 進 config，10M→5000）
 - 文件 — SNAPSHOT 同步：api_reference 0.8→0.9 + pipeline 分層 cadence 段 + INDEX（Patch 19A + timing + 20B）
+- 清理 — 移除 algorithm 層 per-frame/per-candidate debug print 噪音（classical / curve_fit / midline / rules / brightness）；保留 main.py 進度輸出與 REALTIME 每幀 log（純輸出清理，計算不變）
 
 ---
 
