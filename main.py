@@ -25,6 +25,8 @@ from algorithm.diaphragm_detection import detect
 from algorithm.excursion import brightness_way, compute_peak_info
 from algorithm.motion_curve import extract_motion_curve
 from algorithm.multiframe import (
+    RealtimeState,
+    estimate_shift,
     get_keyframe_indices,
     get_legacy_frame_indices,
     run_global_window,
@@ -40,6 +42,7 @@ from config.multiframe_config import MultiframeMode
 from input import apply_dicom_crop, load
 from visualization.global_window import render_global_final
 from visualization.pipeline_visualizer import PipelineVisualizer
+from visualization.realtime import render_realtime_canvas, render_realtime_global
 
 
 def _run_single_frame(
@@ -176,6 +179,11 @@ def run(
             seq, gray_frames, color_frames, segmenter, pv, bundle,
             is_excursion, scale_y,
         )
+    elif bundle.multiframe.mode == MultiframeMode.REALTIME:
+        results = _run_realtime(
+            seq, gray_frames, color_frames, segmenter, pv, bundle,
+            is_excursion, scale_y,
+        )
     else:
         raise NotImplementedError(
             f"Mode {bundle.multiframe.mode} 尚未整合進 main.py"
@@ -266,6 +274,74 @@ def _run_global_window(
         cfg=bundle.viz,
         excursion_cfg=bundle.excursion,
     )
+    return results
+
+
+def _run_realtime(
+    seq, gray_frames, color_frames, segmenter, pv, bundle, is_excursion, scale_y,
+):
+    """REALTIME mode：逐 frame 累積（frame[0] 跳過）+ 雙 track viz。
+
+    每 frame 跑 single-frame → ingest 至 RealtimeState（累積右尾 + rolling
+    全局 excursion）→ canvas / global 兩 track 各存一張。warmup 期顯示
+    "warming up"。state.ingest_frame 為 streaming-ready 接口。
+    """
+    mf = bundle.multiframe
+    n = len(seq.frames)
+    stop = min(n, mf.realtime_max_frames or n)
+    warmup = mf.realtime_warmup_frames
+
+    state = RealtimeState(
+        algorithm_min_width=mf.realtime_algorithm_min_width,
+        wavelet_refresh_every_n=mf.realtime_wavelet_refresh_every_n,
+        wavelet_level_trough=bundle.motion_curve.wavelet_level_trough,
+        wavelet_level_crest=bundle.motion_curve.wavelet_level_crest,
+    )
+
+    print("[realtime] frame 0 skipped (probe init)")
+    results = []
+    prev_gray = gray_frames[0]              # frame 0 作 shift 參考，不 ingest
+    for i in range(1, stop):
+        result = _run_single_frame(
+            seq, i, gray_frames[i], color_frames[i],
+            segmenter, pv, bundle, is_excursion, scale_y,
+        )
+        results.append(result)
+
+        shift = estimate_shift(
+            prev_gray, gray_frames[i], mf.realtime_shift_strategy,
+            stride_pixel=mf.stride_pixel,
+            min_confidence=mf.realtime_shift_min_confidence,
+        )
+        prev_gray = gray_frames[i]
+        is_warmup = i <= warmup
+
+        # shift 有效（found 且 > 0）才 ingest；delay / 低信心幀跳過（不累積）
+        ingested = is_excursion and shift.found and shift.shift_px > 0
+        if ingested:
+            state.ingest_frame(
+                result, i, shift.shift_px, bundle.excursion, scale_y)
+            # 兩 track 同源 state：global 完整、canvas 右錨定視窗
+            render_realtime_global(
+                frame_idx=i, state=state, color_frames=color_frames,
+                is_warmup=is_warmup, warmup_total=warmup,
+                cfg=bundle.viz, excursion_cfg=bundle.excursion,
+            )
+            render_realtime_canvas(
+                frame_idx=i, image_color=color_frames[i], state=state,
+                is_warmup=is_warmup, warmup_total=warmup,
+                cfg=bundle.viz, excursion_cfg=bundle.excursion,
+            )
+
+        status = "warmup" if is_warmup else (
+            "computing" if state.excursion is None else "ready")
+        gcm = state.measurements[0].excursion_cm if state.measurements else None
+        print(f"[realtime {i}/{stop - 1}] "
+              f"shift={shift.shift_px} (raw={shift.raw_shift:.2f}, "
+              f"conf={shift.confidence:.3f}, found={shift.found}), "
+              f"{'ingest' if ingested else 'skip'}, "
+              f"width={state.full_width}, {status}, global_cm={gcm}")
+
     return results
 
 
