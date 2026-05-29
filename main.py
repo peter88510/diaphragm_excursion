@@ -23,7 +23,7 @@ import numpy as np
 from algorithm import FrameResult
 from algorithm.diaphragm_detection import detect
 from algorithm.excursion import brightness_way, compute_peak_info
-from algorithm.motion_curve import extract_motion_curve
+from algorithm.motion_curve import MotionCurveResult, extract_motion_curve
 from algorithm.multiframe import (
     RealtimeState,
     estimate_shift,
@@ -130,6 +130,26 @@ def _run_single_frame(
         frame_result=result,
     )
     return result
+
+
+def _run_light_frame(gray: np.ndarray, y_band, bundle: RunBundle) -> MotionCurveResult:
+    """REALTIME light tier：沿用 cached y_band 只跑 motion_curve（不跑 paddle）。"""
+    return extract_motion_curve(
+        image=cv2.medianBlur(gray, 7),
+        y_range=y_band,
+        config=bundle.motion_curve,
+    )
+
+
+def _max_peak_x(excursion) -> int:
+    """rolling excursion 中最右側被選中的 crest/trough x（無則 -1）；供峰觸發判斷。"""
+    if excursion is None:
+        return -1
+    xs = []
+    for b in excursion.batches:
+        xs.extend(b.selected_crest_x)
+        xs.extend(b.selected_trough_x)
+    return max(xs) if xs else -1
 
 
 def run(
@@ -280,16 +300,20 @@ def _run_global_window(
 def _run_realtime(
     seq, gray_frames, color_frames, segmenter, pv, bundle, is_excursion, scale_y,
 ):
-    """REALTIME mode：逐 frame 累積（frame[0] 跳過）+ 雙 track viz。
+    """REALTIME mode：逐 frame 累積（frame[0] 跳過）+ 分層 cadence + 雙 track viz。
 
-    每 frame 跑 single-frame → ingest 至 RealtimeState（累積右尾 + rolling
-    全局 excursion）→ canvas / global 兩 track 各存一張。warmup 期顯示
-    "warming up"。state.ingest_frame 為 streaming-ready 接口。
+    分層 cadence（Patch 19）避免每幀跑 paddle：
+      - estimate_shift 前移：無效幀（delay / 低信心 / 後退）直接跳過，省 paddle
+      - light tier（多數幀）：沿用 cached y_band 只跑 motion_curve
+      - heavy tier（paddle 整張 frame）：bootstrap / 峰觸發 / 距上次 heavy ≥ K_max
+    mask 採 refresh-recent（見 RealtimeState._append_tail）。ingest_frame 為
+    streaming-ready 接口。
     """
     mf = bundle.multiframe
     n = len(seq.frames)
     stop = min(n, mf.realtime_max_frames or n)
     warmup = mf.realtime_warmup_frames
+    k_max = mf.realtime_seg_refresh_max_n
 
     state = RealtimeState(
         algorithm_min_width=mf.realtime_algorithm_min_width,
@@ -300,46 +324,86 @@ def _run_realtime(
 
     print("[realtime] frame 0 skipped (probe init)")
     results = []
-    prev_gray = gray_frames[0]              # frame 0 作 shift 參考，不 ingest
-    for i in range(1, stop):
-        result = _run_single_frame(
-            seq, i, gray_frames[i], color_frames[i],
-            segmenter, pv, bundle, is_excursion, scale_y,
-        )
-        results.append(result)
+    prev_gray = gray_frames[0]          # frame 0 作 shift 參考，不 ingest
+    cached_y_band = None                # heavy 幀刷新；light 幀沿用
+    frames_since_heavy = 0
+    last_peak_x = -1
+    pending_peak_heavy = False
 
+    for i in range(1, stop):
+        gray = gray_frames[i]
+
+        # 1. estimate_shift 前移（cheap）→ 無效幀跳過，省 paddle
         shift = estimate_shift(
-            prev_gray, gray_frames[i], mf.realtime_shift_strategy,
+            prev_gray, gray, mf.realtime_shift_strategy,
             stride_pixel=mf.stride_pixel,
             min_confidence=mf.realtime_shift_min_confidence,
         )
-        prev_gray = gray_frames[i]
+        prev_gray = gray
+
+        if not (is_excursion and shift.found and shift.shift_px > 0):
+            print(f"[realtime {i}/{stop - 1}] "
+                  f"shift={shift.shift_px} (raw={shift.raw_shift:.2f}, "
+                  f"conf={shift.confidence:.3f}, found={shift.found}), "
+                  f"skip (no paddle)")
+            continue
+
         is_warmup = i <= warmup
 
-        # shift 有效（found 且 > 0）才 ingest；delay / 低信心幀跳過（不累積）
-        ingested = is_excursion and shift.found and shift.shift_px > 0
-        if ingested:
-            state.ingest_frame(
-                result, i, shift.shift_px, bundle.excursion, scale_y)
-            # 兩 track 同源 state：global 完整、canvas 右錨定視窗
-            render_realtime_global(
-                frame_idx=i, state=state, color_frames=color_frames,
-                is_warmup=is_warmup, warmup_total=warmup,
-                cfg=bundle.viz, excursion_cfg=bundle.excursion,
-            )
-            render_realtime_canvas(
-                frame_idx=i, image_color=color_frames[i], state=state,
-                is_warmup=is_warmup, warmup_total=warmup,
-                cfg=bundle.viz, excursion_cfg=bundle.excursion,
-            )
+        # 2. tier 決策：bootstrap / K_max fallback / 峰觸發（warmup 期不峰精修）
+        need_heavy = (
+            cached_y_band is None
+            or frames_since_heavy >= k_max
+            or (pending_peak_heavy and not is_warmup)
+        )
+        pending_peak_heavy = False
 
+        # 3. 跑該 tier 取 motion_curve（heavy 才有 full_mask + 刷新 y_band）
+        if need_heavy:
+            result = _run_single_frame(
+                seq, i, gray, color_frames[i],
+                segmenter, pv, bundle, is_excursion, scale_y,
+            )
+            results.append(result)
+            cached_y_band = result.y_band
+            motion_curve = result.motion_curve
+            full_mask = result.selection.diaphragm_mask
+            frames_since_heavy = 0
+        else:
+            motion_curve = _run_light_frame(gray, cached_y_band, bundle)
+            full_mask = None
+            frames_since_heavy += 1
+
+        # 4. ingest（refresh-recent mask）+ rolling excursion
+        state.ingest_frame(
+            motion_curve, i, shift.shift_px,
+            bundle.excursion, scale_y, full_mask=full_mask,
+        )
+
+        # 5. piggyback：偵測到更右側新峰 → 下一幀 heavy（補峰精度）
+        max_peak_x = _max_peak_x(state.excursion)
+        if max_peak_x > last_peak_x:
+            pending_peak_heavy = True
+            last_peak_x = max_peak_x
+
+        # 6. 雙 track viz（global 完整 / canvas 右錨定視窗）
+        render_realtime_global(
+            frame_idx=i, state=state, color_frames=color_frames,
+            is_warmup=is_warmup, warmup_total=warmup,
+            cfg=bundle.viz, excursion_cfg=bundle.excursion,
+        )
+        render_realtime_canvas(
+            frame_idx=i, image_color=color_frames[i], state=state,
+            is_warmup=is_warmup, warmup_total=warmup,
+            cfg=bundle.viz, excursion_cfg=bundle.excursion,
+        )
+
+        tier = "heavy" if need_heavy else "light"
         status = "warmup" if is_warmup else (
             "computing" if state.excursion is None else "ready")
         gcm = state.measurements[0].excursion_cm if state.measurements else None
         print(f"[realtime {i}/{stop - 1}] "
-              f"shift={shift.shift_px} (raw={shift.raw_shift:.2f}, "
-              f"conf={shift.confidence:.3f}, found={shift.found}), "
-              f"{'ingest' if ingested else 'skip'}, "
+              f"shift={shift.shift_px}, {tier}, "
               f"width={state.full_width}, {status}, global_cm={gcm}")
 
     return results

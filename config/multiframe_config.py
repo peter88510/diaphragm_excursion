@@ -88,5 +88,9 @@ class MultiframeConfig:
     # None = 不重做（純 append）
     realtime_wavelet_refresh_every_n: Optional[int] = 50
 
+    # 分層 cadence fallback：距上次 heavy（paddle）幀達此數強制再跑一次 paddle，
+    # 確保 y_band / mask 不長期漂移（峰觸發為主，此為保底上限）
+    realtime_seg_refresh_max_n: int = 30
+
     # 跑到第幾幀停止；None = 跑完整 sequence（測試用）
     realtime_max_frames: Optional[int] = None

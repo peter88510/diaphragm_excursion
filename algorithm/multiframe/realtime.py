@@ -31,7 +31,7 @@ from algorithm.excursion import (
     brightness_way,
     compute_peak_info,
 )
-from algorithm.frame_result import FrameResult
+from algorithm.motion_curve import MotionCurveResult
 from algorithm.signal_processing import wavelet_denoising
 from config.excursion_config import ExcursionConfig
 
@@ -68,18 +68,21 @@ class RealtimeState:
 
     def ingest_frame(
         self,
-        frame_result: FrameResult,
+        motion_curve: MotionCurveResult,
         idx: int,
         shift_px: int,
         excursion_cfg: ExcursionConfig,
         scale_y: Optional[float] = None,
+        full_mask: Optional[np.ndarray] = None,
     ) -> None:
-        """納入一個新 frame：append 右尾 shift_px → 視情況 refresh wavelet → rolling excursion。
+        """納入一個新 frame：append 右尾 → 視情況 refresh wavelet → rolling excursion。
 
-        shift_px 由 caller 用 estimate_shift 算出（變動位移；取代固定 stride）。
-        streaming-ready 外部接口；未來換真實 stream 來源只需照樣呼叫。
+        分層 cadence（Patch 19）：light 幀只帶 motion_curve；heavy 幀另帶 paddle
+        整張 frame mask（full_mask）。curve buffer 永遠 append-only；mask buffer
+        light 沿用最右欄、heavy 以 full_mask 右對齊覆蓋最右段（refresh-recent）。
+        streaming-ready 接口；shift_px 由 caller 用 estimate_shift 算出。
         """
-        self._append_tail(frame_result, shift_px)
+        self._append_tail(motion_curve, shift_px, full_mask)
         self.ingested_indices.append(idx)
         self.shifts.append(shift_px)
         self.last_frame_idx = idx
@@ -93,18 +96,19 @@ class RealtimeState:
 
     # ---------- internal ----------
 
-    def _append_tail(self, frame_result: FrameResult, shift_px: int) -> None:
-        """取 frame 的 motion_curve / mask 右尾 shift_px，初始化或 concat 到 buffer。"""
-        mc = frame_result.motion_curve
-        mask = frame_result.selection.diaphragm_mask
+    def _append_tail(
+        self,
+        mc: MotionCurveResult,
+        shift_px: int,
+        full_mask: Optional[np.ndarray],
+    ) -> None:
+        """curve buffer append 右尾 shift_px；mask buffer append + heavy refresh-recent。"""
         s = shift_px
-
         init_t = mc.init_diaphragm[-s:]
         st_t = mc.smoothed_trough[-s:]
         sc_t = mc.smoothed_crest[-s:]
         pt_t = mc.diaphragm_p_trough[-s:]
         pc_t = mc.diaphragm_p_crest[-s:]
-        mask_t = mask[:, -s:]
 
         if self.stitched_init_diaphragm is None:
             self.stitched_init_diaphragm = init_t.copy()
@@ -112,7 +116,8 @@ class RealtimeState:
             self.stitched_smoothed_crest = sc_t.copy()
             self.stitched_p_trough = pt_t.copy()
             self.stitched_p_crest = pc_t.copy()
-            self.stitched_diaphragm_mask = mask_t.copy()
+            # 首個 ingest 幀必為 heavy（caller 保證 full_mask 非 None）
+            self.stitched_diaphragm_mask = full_mask[:, -s:].copy()
         else:
             self.stitched_init_diaphragm = np.concatenate(
                 [self.stitched_init_diaphragm, init_t])
@@ -124,8 +129,20 @@ class RealtimeState:
                 [self.stitched_p_trough, pt_t])
             self.stitched_p_crest = np.concatenate(
                 [self.stitched_p_crest, pc_t])
+            # light：沿用 buffer 最右欄補 s 欄（暫填，下個 heavy refresh 覆蓋）
+            # heavy：取 full_mask 右尾 s 欄
+            if full_mask is not None:
+                mask_t = full_mask[:, -s:]
+            else:
+                mask_t = np.repeat(self.stitched_diaphragm_mask[:, -1:], s, axis=1)
             self.stitched_diaphragm_mask = np.concatenate(
                 [self.stitched_diaphragm_mask, mask_t], axis=1)
+
+        # heavy refresh-recent：frame[i] 含最近 ~frame_width 歷史，右對齊覆蓋 buffer
+        # 最右 min(frame_width, full_width) 欄 → 補回 peak 落後偵測的精度缺口
+        if full_mask is not None:
+            k = min(full_mask.shape[1], self.stitched_diaphragm_mask.shape[1])
+            self.stitched_diaphragm_mask[:, -k:] = full_mask[:, -k:]
 
     def _should_refresh_wavelet(self) -> bool:
         """每 wavelet_refresh_every_n 幀 refresh；未達 min_width / None 不 refresh。"""
