@@ -27,13 +27,14 @@ def global_final_path(cfg: VisualizationConfig) -> Path:
 
 
 def realtime_canvas_path(cfg: VisualizationConfig, frame_idx: int) -> Path:
-    """REALTIME mode 的當下視窗 track（逐 frame）。"""
+    """REALTIME mode canvas track PNG（逐 frame，debug 用；預設不開）。"""
     return cfg.output_dir / "realtime" / "canvas" / f"{frame_idx:04d}.png"
 
 
-def realtime_global_path(cfg: VisualizationConfig, frame_idx: int) -> Path:
-    """REALTIME mode 的累積拼接 track（逐 frame）。"""
-    return cfg.output_dir / "realtime" / "global" / f"{frame_idx:04d}.png"
+def realtime_video_path(cfg: VisualizationConfig, source_path: str) -> Path:
+    """REALTIME mode 的 mp4 影片輸出；命名 `{source_stem}_realtime.mp4`。"""
+    stem = Path(source_path).stem
+    return cfg.output_dir / "realtime" / f"{stem}_realtime.mp4"
 
 
 def debug_path(cfg: VisualizationConfig, stage: str, frame_idx: int) -> Path:
@@ -48,8 +49,12 @@ def should_save_final(cfg: VisualizationConfig) -> bool:
     return cfg.enabled and cfg.save_final
 
 
-def should_save_realtime(cfg: VisualizationConfig) -> bool:
-    return cfg.enabled and cfg.save_realtime
+def should_save_realtime_video(cfg: VisualizationConfig) -> bool:
+    return cfg.enabled and cfg.save_realtime_video
+
+
+def should_save_realtime_canvas_png(cfg: VisualizationConfig) -> bool:
+    return cfg.enabled and cfg.save_realtime_canvas_png
 
 
 def should_save_debug(cfg: VisualizationConfig, stage: str) -> bool:

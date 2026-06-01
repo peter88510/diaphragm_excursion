@@ -1,28 +1,25 @@
-"""REALTIME mode 雙 track viz。
+"""REALTIME mode canvas viz（即時監視器 track）。
 
-兩 track 皆從 RealtimeState 累積拼接結果衍生（同源 overlay）：
-  - global track：完整累積 color canvas（frame 各取右尾 shift 拼接）+ 全局 overlay
-                  → {output_dir}/realtime/global/{i:04d}.png
-  - canvas track：base = frame[i] 原始影像（恆 = 影像寬），疊上 global 軌跡最右段
-                  （右錨定對齊：global 最新點 = frame[i] 最右欄）
-                  → {output_dir}/realtime/canvas/{i:04d}.png
-                  模擬即時監視器：邊拍邊看新進來的計算結果，固定寬不裁切。
+base = frame[i] 原始影像（恆 = 影像寬），疊上 global 軌跡最右段（右錨定對齊：
+global 最新點 = frame[i] 最右欄）。模擬即時監視器，固定寬不裁切。
 
 對齊原理：M-mode x 軸為時間，frame[i] 與 global 最右段都代表「最近這段時間」，
 逐欄對應同一時刻（frame[i]→[i+1] 捲動量 = estimate_shift；估計準時無偏移）。
 canvas 比 global 窄時取 global 最右 (= 影像寬) 段；global 尚短時右錨定、左側留白。
 
-累積邊界虛線（canvas track）：line_x = view_width - full_width，標記左側起始未計算 /
-右側已累積；隨累積往左捲，full_width >= view_width 後 line_x<=0 即不畫。global track
-canvas=全寬 → line_x=0 不畫。
+累積邊界虛線：line_x = view_width - full_width，標記左側起始未計算 / 右側已累積；
+隨累積往左捲，full_width >= view_width 後 line_x<=0 即不畫。
 
-元素開關讀 cfg.rt_show_*（motion_curve / peak_markers / excursion_text）。
+元素開關讀 cfg.rt_show_*（motion_curve / peak_markers / excursion_text）；
+共用至 PNG 與 mp4 video 兩種輸出。
 
 Warmup gating（is_warmup 由 main 判定 frame_idx <= warmup_frames）：
   - warmup 期 → "warming up i/N"；過 warmup 但 width 未達 min（excursion=None）→ "computing..."
   - status 文字置左上（固定寬不裁切）；虛線各狀態都疊（呈現累積進度）
 
 px / 字型 ratio 化沿用 info_display（ref height-relative）；status 文字 ratio 同基準。
+
+render_realtime_canvas 回傳 canvas array（cv2 BGR uint8）；caller 決定寫 PNG / video。
 """
 from dataclasses import replace
 
@@ -33,12 +30,6 @@ from PIL import Image, ImageDraw, ImageFont
 from algorithm.multiframe.realtime import RealtimeState
 from config import ExcursionConfig, VisualizationConfig
 from visualization.info_display import excursion_info_display
-from visualization.io import (
-    realtime_canvas_path,
-    realtime_global_path,
-    save_png,
-    should_save_realtime,
-)
 from visualization.pipeline_visualizer import _FINAL_MOTION_COLOR
 
 
@@ -56,24 +47,6 @@ _BOUNDARY_COLOR = (255, 0, 255)   # magenta BGR
 _RATIO_BOUNDARY_DASH = 6 / _REF_HEIGHT
 
 
-def render_realtime_global(
-    frame_idx: int,
-    state: RealtimeState,
-    color_frames: np.ndarray,
-    is_warmup: bool,
-    warmup_total: int,
-    cfg: VisualizationConfig,
-    excursion_cfg: ExcursionConfig,
-) -> None:
-    """完整累積拼接 track：global color canvas + 全局 overlay（或狀態文字）。"""
-    if not should_save_realtime(cfg) or not state.ingested_indices:
-        return
-
-    canvas = _build_global_color_canvas(state, color_frames)
-    canvas = _annotate(canvas, state, frame_idx, is_warmup, warmup_total, cfg)
-    save_png(canvas, realtime_global_path(cfg, frame_idx))
-
-
 def render_realtime_canvas(
     frame_idx: int,
     image_color: np.ndarray,
@@ -82,28 +55,17 @@ def render_realtime_canvas(
     warmup_total: int,
     cfg: VisualizationConfig,
     excursion_cfg: ExcursionConfig,
-) -> None:
-    """即時監視器 track：base = frame[i] 原始影像，疊 global 軌跡最右段（右錨定）。"""
-    if not should_save_realtime(cfg) or not state.ingested_indices:
-        return
-
-    canvas = image_color.copy()        # base = frame[i]，寬 = 影像寬（不寫死）
-    canvas = _annotate(canvas, state, frame_idx, is_warmup, warmup_total, cfg)
-    save_png(canvas, realtime_canvas_path(cfg, frame_idx))
-
-
-# ---------- shared helpers ----------
-
-def _build_global_color_canvas(
-    state: RealtimeState, color_frames: np.ndarray,
 ) -> np.ndarray:
-    """每個 ingested frame 取 color 右尾 = 該幀實測 shift，concat 成累積 color canvas。"""
-    tails = [
-        color_frames[idx][:, -shift:]
-        for idx, shift in zip(state.ingested_indices, state.shifts)
-    ]
-    return np.concatenate(tails, axis=1)
+    """即時監視器 track：base = frame[i] 原始影像，疊 global 軌跡最右段（右錨定）。
 
+    Returns:
+        canvas (cv2 BGR uint8)；caller 決定寫 PNG 與 / 或 video。
+    """
+    canvas = image_color.copy()        # base = frame[i]，寬 = 影像寬（不寫死）
+    return _annotate(canvas, state, frame_idx, is_warmup, warmup_total, cfg)
+
+
+# ---------- internal helpers ----------
 
 def _annotate(
     canvas: np.ndarray,

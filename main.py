@@ -17,6 +17,7 @@ Multi-frame dispatch（依 MultiframeConfig.mode）：
 """
 import time
 from collections import defaultdict
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -44,8 +45,16 @@ from config import Phase, RunBundle
 from config.multiframe_config import MultiframeMode
 from input import apply_dicom_crop, load
 from visualization.global_window import render_global_final
+from visualization.io import (
+    realtime_canvas_path,
+    realtime_video_path,
+    save_png,
+    should_save_realtime_canvas_png,
+    should_save_realtime_video,
+)
 from visualization.pipeline_visualizer import PipelineVisualizer
-from visualization.realtime import render_realtime_canvas, render_realtime_global
+from visualization.realtime import render_realtime_canvas
+from visualization.realtime_video import RealtimeVideoWriter
 
 
 @dataclass
@@ -381,14 +390,20 @@ def _run_global_window(
 def _run_realtime(
     seq, gray_frames, color_frames, segmenter, pv, bundle, is_excursion, scale_y,
 ):
-    """REALTIME mode：逐 frame 累積（frame[0] 跳過）+ 分層 cadence + 雙 track viz。
+    """REALTIME mode：逐 frame 累積（frame[0] 跳過）+ 分層 cadence + canvas → mp4 video。
 
     分層 cadence（Patch 19）避免每幀跑 paddle：
       - estimate_shift 前移：無效幀（delay / 低信心 / 後退）直接跳過，省 paddle
       - light tier（多數幀）：沿用 cached y_band 只跑 motion_curve
       - heavy tier（paddle 整張 frame）：bootstrap / 峰觸發 / 距上次 heavy ≥ K_max
-    mask 採 refresh-recent（見 RealtimeState._append_tail）。ingest_frame 為
-    streaming-ready 接口。
+    mask 採 refresh-recent（見 RealtimeState._append_tail）。
+
+    輸出（Patch 22）：
+      - mp4 video（save_realtime_video，預設開）：canvas 串成
+        {source_stem}_realtime.mp4；skip 幀 carry-forward 上一張 canvas，
+        pre-bootstrap 用原始 color frame 補位 → 影片時長 ≈ 原錄製時間
+      - canvas PNG（save_realtime_canvas_png，預設關，debug 用）：每 ingested
+        frame 一張，檔名稀疏跳號正常
     """
     mf = bundle.multiframe
     n = len(seq.frames)
@@ -404,6 +419,18 @@ def _run_realtime(
     )
     timing = RealtimeTiming()
 
+    # video writer 設定（fps fallback + W/H 從 color_frames[0] 推導）
+    fps = seq.fps
+    if fps is None or fps <= 0:
+        print(f"[realtime] warning: seq.fps={seq.fps} → fallback 30.0")
+        fps = 30.0
+    H, W = color_frames[0].shape[:2]
+    if should_save_realtime_video(bundle.viz):
+        video_ctx = RealtimeVideoWriter(
+            realtime_video_path(bundle.viz, seq.source_path), fps, W, H)
+    else:
+        video_ctx = nullcontext()
+
     print("[realtime] frame 0 skipped (probe init)")
     results = []
     prev_gray = gray_frames[0]          # frame 0 作 shift 參考，不 ingest
@@ -414,92 +441,99 @@ def _run_realtime(
     n_skip = 0
 
     loop_start = time.perf_counter()
-    for i in range(1, stop):
-        gray = gray_frames[i]
+    with video_ctx as vw:
+        # frame 0 placeholder：保時間軸從 0 起完整（pre-bootstrap 無 canvas）
+        if vw is not None:
+            vw.write_placeholder(color_frames[0])
 
-        # 1. estimate_shift 前移（cheap）→ 無效幀跳過，省 paddle
-        t = time.perf_counter()
-        shift = estimate_shift(
-            prev_gray, gray, mf.realtime_shift_strategy,
-            stride_pixel=mf.stride_pixel,
-            min_confidence=mf.realtime_shift_min_confidence,
-        )
-        timing.record("shift", time.perf_counter() - t)
-        prev_gray = gray
+        for i in range(1, stop):
+            gray = gray_frames[i]
 
-        if not (is_excursion and shift.found and shift.shift_px > 0):
-            n_skip += 1
-            print(f"[realtime {i}/{stop - 1}] "
-                  f"shift={shift.shift_px} (raw={shift.raw_shift:.2f}, "
-                  f"conf={shift.confidence:.3f}, found={shift.found}), "
-                  f"skip (no paddle)")
-            continue
-
-        is_warmup = i <= warmup
-
-        # 2. tier 決策：bootstrap / K_max fallback / 峰觸發（warmup 期不峰精修）
-        need_heavy = (
-            cached_y_band is None
-            or frames_since_heavy >= k_max
-            or (pending_peak_heavy and not is_warmup)
-        )
-        pending_peak_heavy = False
-
-        # 3. 跑該 tier 取 motion_curve（heavy 才有 full_mask + 刷新 y_band）
-        if need_heavy:
+            # 1. estimate_shift 前移（cheap）→ 無效幀跳過，省 paddle
             t = time.perf_counter()
-            result = _run_single_frame(
-                seq, i, gray, color_frames[i],
-                segmenter, pv, bundle, is_excursion, scale_y, timing=timing,
+            shift = estimate_shift(
+                prev_gray, gray, mf.realtime_shift_strategy,
+                stride_pixel=mf.stride_pixel,
+                min_confidence=mf.realtime_shift_min_confidence,
             )
-            timing.record("heavy", time.perf_counter() - t)
-            results.append(result)
-            cached_y_band = result.y_band
-            motion_curve = result.motion_curve
-            full_mask = result.selection.diaphragm_mask
-            frames_since_heavy = 0
-        else:
+            timing.record("shift", time.perf_counter() - t)
+            prev_gray = gray
+
+            if not (is_excursion and shift.found and shift.shift_px > 0):
+                n_skip += 1
+                print(f"[realtime {i}/{stop - 1}] "
+                      f"shift={shift.shift_px} (raw={shift.raw_shift:.2f}, "
+                      f"conf={shift.confidence:.3f}, found={shift.found}), "
+                      f"skip (no paddle)")
+                # 影片仍寫一幀保時間軸：carry-forward 上一張 canvas；無 last 則 placeholder
+                if vw is not None and not vw.write_skip():
+                    vw.write_placeholder(color_frames[i])
+                continue
+
+            is_warmup = i <= warmup
+
+            # 2. tier 決策：bootstrap / K_max fallback / 峰觸發（warmup 期不峰精修）
+            need_heavy = (
+                cached_y_band is None
+                or frames_since_heavy >= k_max
+                or (pending_peak_heavy and not is_warmup)
+            )
+            pending_peak_heavy = False
+
+            # 3. 跑該 tier 取 motion_curve（heavy 才有 full_mask + 刷新 y_band）
+            if need_heavy:
+                t = time.perf_counter()
+                result = _run_single_frame(
+                    seq, i, gray, color_frames[i],
+                    segmenter, pv, bundle, is_excursion, scale_y, timing=timing,
+                )
+                timing.record("heavy", time.perf_counter() - t)
+                results.append(result)
+                cached_y_band = result.y_band
+                motion_curve = result.motion_curve
+                full_mask = result.selection.diaphragm_mask
+                frames_since_heavy = 0
+            else:
+                t = time.perf_counter()
+                motion_curve = _run_light_frame(gray, cached_y_band, bundle)
+                timing.record("light", time.perf_counter() - t)
+                full_mask = None
+                frames_since_heavy += 1
+
+            # 4. ingest（refresh-recent mask）+ rolling excursion
             t = time.perf_counter()
-            motion_curve = _run_light_frame(gray, cached_y_band, bundle)
-            timing.record("light", time.perf_counter() - t)
-            full_mask = None
-            frames_since_heavy += 1
+            state.ingest_frame(
+                motion_curve, i, shift.shift_px,
+                bundle.excursion, scale_y, full_mask=full_mask,
+            )
+            timing.record("ingest", time.perf_counter() - t)
 
-        # 4. ingest（refresh-recent mask）+ rolling excursion
-        t = time.perf_counter()
-        state.ingest_frame(
-            motion_curve, i, shift.shift_px,
-            bundle.excursion, scale_y, full_mask=full_mask,
-        )
-        timing.record("ingest", time.perf_counter() - t)
+            # 5. piggyback：偵測到更右側新峰 → 下一幀 heavy（補峰精度）
+            max_peak_x = _max_peak_x(state.excursion)
+            if max_peak_x > last_peak_x:
+                pending_peak_heavy = True
+                last_peak_x = max_peak_x
 
-        # 5. piggyback：偵測到更右側新峰 → 下一幀 heavy（補峰精度）
-        max_peak_x = _max_peak_x(state.excursion)
-        if max_peak_x > last_peak_x:
-            pending_peak_heavy = True
-            last_peak_x = max_peak_x
+            # 6. viz：canvas 一次 render → 同源寫 PNG / video（rt_show_* 共用）
+            t = time.perf_counter()
+            canvas = render_realtime_canvas(
+                frame_idx=i, image_color=color_frames[i], state=state,
+                is_warmup=is_warmup, warmup_total=warmup,
+                cfg=bundle.viz, excursion_cfg=bundle.excursion,
+            )
+            if should_save_realtime_canvas_png(bundle.viz):
+                save_png(canvas, realtime_canvas_path(bundle.viz, i))
+            if vw is not None:
+                vw.write(canvas)
+            timing.record("viz", time.perf_counter() - t)
 
-        # 6. 雙 track viz（global 完整 / canvas 右錨定視窗）
-        t = time.perf_counter()
-        render_realtime_global(
-            frame_idx=i, state=state, color_frames=color_frames,
-            is_warmup=is_warmup, warmup_total=warmup,
-            cfg=bundle.viz, excursion_cfg=bundle.excursion,
-        )
-        render_realtime_canvas(
-            frame_idx=i, image_color=color_frames[i], state=state,
-            is_warmup=is_warmup, warmup_total=warmup,
-            cfg=bundle.viz, excursion_cfg=bundle.excursion,
-        )
-        timing.record("viz", time.perf_counter() - t)
-
-        tier = "heavy" if need_heavy else "light"
-        status = "warmup" if is_warmup else (
-            "computing" if state.excursion is None else "ready")
-        gcm = state.measurements[0].excursion_cm if state.measurements else None
-        print(f"[realtime {i}/{stop - 1}] "
-              f"shift={shift.shift_px}, {tier}, "
-              f"width={state.full_width}, {status}, global_cm={gcm}")
+            tier = "heavy" if need_heavy else "light"
+            status = "warmup" if is_warmup else (
+                "computing" if state.excursion is None else "ready")
+            gcm = state.measurements[0].excursion_cm if state.measurements else None
+            print(f"[realtime {i}/{stop - 1}] "
+                  f"shift={shift.shift_px}, {tier}, "
+                  f"width={state.full_width}, {status}, global_cm={gcm}")
 
     loop_total = time.perf_counter() - loop_start
     print(f"[realtime] frames: heavy={timing.counts['heavy']} "

@@ -22,6 +22,7 @@ def build_bundle() -> RunBundle:
     # bundle.multiframe.mode = MultiframeMode.REALTIME
     # bundle.multiframe.keyframe_indices = [86, 149]
     # bundle.viz.enabled = True
-    # bundle.viz.save_realtime = True
+    # bundle.viz.save_realtime_video = True       # mp4 → output/realtime/{stem}_realtime.mp4
+    # bundle.viz.save_realtime_canvas_png = True  # debug 用，每 ingested frame 一張 PNG
 
     return bundle
